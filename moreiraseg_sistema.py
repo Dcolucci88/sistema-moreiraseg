@@ -22,11 +22,10 @@ except ImportError:
 # Nome do arquivo do banco de dados (continuará local por enquanto)
 DB_NAME = "moreiraseg.db"
 
-# --- CORREÇÃO DO CAMINHO DAS IMAGENS ---
 # Caminhos relativos para os assets, usando o nome da sua pasta no GitHub
 ASSETS_DIR = "LogoTipo" 
 LOGO_PATH = os.path.join(ASSETS_DIR, "logo_azul.png")
-ICONE_PATH = os.path.join(ASSETS_DIR, "icone.png") # Assumindo que o icone.png também está aqui
+ICONE_PATH = os.path.join(ASSETS_DIR, "Icone.png")
 
 # --- FUNÇÕES DE BANCO DE DADOS ---
 
@@ -443,7 +442,7 @@ def main():
     """Função principal que renderiza a aplicação Streamlit."""
     st.set_page_config(
         page_title="Moreiraseg - Gestão de Apólices",
-        page_icon=ICONE_PATH, # Usa o ícone na aba do navegador
+        page_icon=ICONE_PATH,
         layout="wide",
         initial_sidebar_state="expanded"
     )
@@ -459,7 +458,6 @@ def main():
         col1, col2, col3 = st.columns([1, 1.5, 1])
         with col2:
             try:
-                # --- ALTERAÇÃO 1: Imagem na página de login ---
                 st.image(ICONE_PATH, width=150)
             except Exception:
                 st.title("Sistema de Gestão de Apólices")
@@ -483,16 +481,14 @@ def main():
             st.info("Para testes, use: `adm@moreiraseg.com.br` / `Salmo@139`")
         return
 
-    # --- Layout após o login ---
     with st.sidebar:
         st.title(f"Olá, {st.session_state.user_nome.split()[0]}!")
         st.write(f"Perfil: `{st.session_state.user_perfil.capitalize()}`")
         
-        # --- ALTERAÇÃO 2: Imagem na barra lateral ---
         try:
             st.image(ICONE_PATH, width=80)
         except Exception:
-            st.write("Menu") # Fallback se a imagem não carregar
+            st.write("Menu")
         
         st.divider()
 
@@ -514,16 +510,36 @@ def main():
             st.session_state.user_perfil = None
             st.rerun()
 
-    # --- ALTERAÇÃO 3: Logótipo centralizado na página principal ---
     col1, col2, col3 = st.columns([2, 3, 2])
     with col2:
         try:
             st.image(LOGO_PATH)
         except Exception as e:
             st.warning(f"Não foi possível carregar o logótipo principal: {e}")
-    st.write("") # Adiciona um espaço
+    st.write("")
 
-    # Bloco de execução principal - COMPLETO
+    # --- FERRAMENTA DE DIAGNÓSTICO ---
+    with st.expander("Clique aqui para ver a estrutura de arquivos (Ferramenta de Diagnóstico)"):
+        st.write("Verificando a estrutura de arquivos que o Streamlit vê:")
+        try:
+            st.write("**Arquivos e pastas na raiz do projeto:**")
+            for item in os.listdir("."):
+                st.write(f"- `{item}`")
+
+            st.write(f"\n**Verificando a pasta '{ASSETS_DIR}':**")
+            if os.path.exists(ASSETS_DIR):
+                st.success(f"✅ A pasta '{ASSETS_DIR}' foi encontrada!")
+                st.write(f"**Conteúdo de '{ASSETS_DIR}':**")
+                for item in os.listdir(ASSETS_DIR):
+                    st.write(f"- `{item}`")
+            else:
+                st.error(f"❌ A pasta '{ASSETS_DIR}' NÃO foi encontrada na raiz do projeto.")
+
+        except Exception as e:
+            st.write(f"Erro ao listar arquivos: {e}")
+    st.divider()
+    # --- FIM DA FERRAMENTA DE DIAGNÓSTICO ---
+
     if menu_opcao == "📊 Painel de Controle":
         render_dashboard()
     elif menu_opcao == "➕ Cadastrar Apólice":
