@@ -464,18 +464,11 @@ def main():
         st.session_state.user_nome = None
         st.session_state.user_perfil = None
     
-        if not st.session_state.user_email:
-        col1, col2, col3 = st.columns([1, 2, 1])
+    if not st.session_state.user_email:
+        col1, col2, col3 = st.columns([1, 1.5, 1])
         with col2:
             try:
-                # Container para centralizar a imagem e o texto
-                container = st.container()
-                with container:
-                    st.image(ICONE_PATH, width=200)
-                    st.markdown(
-                        "<h3 style='text-align: center;'>Sistema de Gestão Moreiraseg</h3>", 
-                        unsafe_allow_html=True
-                    )
+                st.image(ICONE_PATH, width=150)
             except Exception:
                 st.title("Sistema de Gestão de Apólices")
             st.write("")
