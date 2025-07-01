@@ -464,8 +464,8 @@ def main():
         st.session_state.user_nome = None
         st.session_state.user_perfil = None
     
-    if not st.session_state.user_email:
-                col1, col2, col3 = st.columns([1, 2, 1])
+        if not st.session_state.user_email:
+        col1, col2, col3 = st.columns([1, 2, 1])
         with col2:
             try:
                 # Container para centralizar a imagem e o texto
