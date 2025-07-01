@@ -440,6 +440,16 @@ def render_cadastro_form():
 
 def main():
     """Função principal que renderiza a aplicação Streamlit."""
+    # ========== INÍCIO DA CORREÇÃO ========== (adicione estas linhas)
+    hide_streamlit_style = """
+        <style>
+            footer {visibility: hidden;}
+            .stDeployButton {display:none;}
+        </style>
+    """
+    st.markdown(hide_streamlit_style, unsafe_allow_html=True)
+    # ========== FIM DA CORREÇÃO ==========
+    
     st.set_page_config(
         page_title="Moreiraseg - Gestão de Apólices",
         page_icon=ICONE_PATH,
