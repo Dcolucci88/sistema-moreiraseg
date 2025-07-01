@@ -438,18 +438,61 @@ def render_cadastro_form():
                         st.markdown(f"**Link:** [Abrir PDF]({caminho_pdf})")
                     st.balloons()
 
+def render_configuracoes():
+    """Renderiza a página de configurações (somente para admin)."""
+    st.title("⚙️ Configurações do Sistema")
+    tab1, tab2 = st.tabs(["Gerenciar Usuários", "Backup e Restauração"])
+
+    with tab1:
+        st.subheader("Usuários Cadastrados")
+        try:
+            with get_connection() as conn:
+                usuarios_df = pd.read_sql_query("SELECT id, nome, email, perfil, data_cadastro FROM usuarios", conn)
+            st.dataframe(usuarios_df, use_container_width=True)
+        except Exception as e:
+            st.error(f"Erro ao listar usuários: {e}")
+
+        with st.expander("Adicionar Novo Usuário"):
+            with st.form("form_novo_usuario", clear_on_submit=True):
+                nome = st.text_input("Nome Completo")
+                email = st.text_input("E-mail")
+                senha = st.text_input("Senha", type="password")
+                perfil = st.selectbox("Perfil", ["user", "admin"])
+                
+                if st.form_submit_button("Adicionar Usuário"):
+                    if not all([nome, email, senha, perfil]):
+                        st.warning("Todos os campos são obrigatórios.")
+                    else:
+                        try:
+                            with get_connection() as conn:
+                                c = conn.cursor()
+                                c.execute(
+                                    "INSERT INTO usuarios (nome, email, senha, perfil) VALUES (?, ?, ?, ?)",
+                                    (nome, email, senha, perfil)
+                                )
+                                conn.commit()
+                            st.success(f"Usuário '{nome}' adicionado com sucesso!")
+                            st.rerun()
+                        except sqlite3.IntegrityError:
+                            st.error(f"Erro: O e-mail '{email}' já está cadastrado.")
+                        except Exception as e:
+                            st.error(f"Erro ao adicionar usuário: {e}")
+
+    with tab2:
+        st.subheader("Backup de Dados (Exportar)")
+        with get_connection() as conn:
+            all_data_df = pd.read_sql_query("SELECT * FROM apolices", conn)
+        
+        csv_data = all_data_df.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="📥 Exportar Backup Completo (CSV)",
+            data=csv_data,
+            file_name=f"backup_completo_apolices_{date.today()}.csv",
+            mime="text/csv"
+        )
+
 def main():
     """Função principal que renderiza a aplicação Streamlit."""
-    # ========== INÍCIO DA CORREÇÃO ========== (adicione estas linhas)
-    hide_streamlit_style = """
-        <style>
-            footer {visibility: hidden;}
-            .stDeployButton {display:none;}
-        </style>
-    """
-    st.markdown(hide_streamlit_style, unsafe_allow_html=True)
-    # ========== FIM DA CORREÇÃO ==========
-    
     st.set_page_config(
         page_title="Moreiraseg - Gestão de Apólices",
         page_icon=ICONE_PATH,
@@ -536,9 +579,9 @@ def main():
         render_consulta_apolices()
     elif menu_opcao == "🔄 Gerenciar Apólices":
         render_gerenciamento_apolices()
-    # A página de configurações pode ser adicionada aqui se necessário
-    # elif menu_opcao == "⚙️ Configurações" and st.session_state.user_perfil == 'admin':
-    #     render_configuracoes()
+    elif menu_opcao == "⚙️ Configurações" and st.session_state.user_perfil == 'admin':
+        render_configuracoes()
 
 if __name__ == "__main__":
     main()
+
