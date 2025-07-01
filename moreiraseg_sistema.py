@@ -22,11 +22,11 @@ except ImportError:
 # Nome do arquivo do banco de dados (continuará local por enquanto)
 DB_NAME = "moreiraseg.db"
 
-# Caminhos relativos para os assets
-# Certifique-se de que tem uma pasta chamada "assets" no seu repositório GitHub
-ASSETS_DIR = "assets"
+# --- CORREÇÃO DO CAMINHO DAS IMAGENS ---
+# Caminhos relativos para os assets, usando o nome da sua pasta no GitHub
+ASSETS_DIR = "LogoTipo" 
 LOGO_PATH = os.path.join(ASSETS_DIR, "logo_azul.png")
-ICONE_PATH = os.path.join(ASSETS_DIR, "icone.png")
+ICONE_PATH = os.path.join(ASSETS_DIR, "icone.png") # Assumindo que o icone.png também está aqui
 
 # --- FUNÇÕES DE BANCO DE DADOS ---
 
@@ -459,6 +459,7 @@ def main():
         col1, col2, col3 = st.columns([1, 1.5, 1])
         with col2:
             try:
+                # Tenta carregar a imagem. Se falhar, mostra o título.
                 st.image(LOGO_PATH)
             except Exception:
                 st.title("Sistema de Gestão de Apólices")
@@ -509,6 +510,7 @@ def main():
             st.session_state.user_perfil = None
             st.rerun()
 
+    # Bloco de execução principal - CORRIGIDO E COMPLETO
     if menu_opcao == "📊 Painel de Controle":
         render_dashboard()
     elif menu_opcao == "➕ Cadastrar Apólice":
@@ -517,9 +519,10 @@ def main():
         render_consulta_apolices()
     elif menu_opcao == "🔄 Gerenciar Apólices":
         render_gerenciamento_apolices()
-    # Adicione a chamada para a página de configurações aqui, se necessário
+    # A página de configurações pode ser adicionada aqui se necessário
     # elif menu_opcao == "⚙️ Configurações" and st.session_state.user_perfil == 'admin':
     #     render_configuracoes()
 
 if __name__ == "__main__":
     main()
+
