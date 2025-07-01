@@ -182,6 +182,24 @@ def add_apolice(data):
         st.error(f"❌ Ocorreu um erro inesperado ao cadastrar: {e}")
         return False
 
+def update_apolice(apolice_id, update_data):
+    """Atualiza os dados de uma apólice existente."""
+    try:
+        with get_connection() as conn:
+            c = conn.cursor()
+            set_clause = ", ".join([f"{key} = ?" for key in update_data.keys()])
+            values = list(update_data.values())
+            values.append(apolice_id)
+            query = f"UPDATE apolices SET {set_clause} WHERE id = ?"
+            c.execute(query, tuple(values))
+            conn.commit()
+            detalhes = f"Campos atualizados: {', '.join(update_data.keys())}"
+            add_historico(apolice_id, st.session_state.get('user_email', 'sistema'), 'Atualização', detalhes)
+            return True
+    except Exception as e:
+        st.error(f"❌ Erro ao atualizar a apólice: {e}")
+        return False
+
 def get_apolices():
     try:
         with get_connection() as conn:
@@ -202,6 +220,21 @@ def get_apolices():
         df['prioridade'] = df['dias_restantes'].apply(define_prioridade)
         df.drop(columns=['data_final_de_vigencia_dt'], inplace=True)
     return df
+    
+def get_apolice_details(apolice_id):
+    """Obtém detalhes e histórico de uma apólice específica."""
+    try:
+        with get_connection() as conn:
+            conn.row_factory = sqlite3.Row
+            c = conn.cursor()
+            c.execute("SELECT * FROM apolices WHERE id = ?", (apolice_id,))
+            apolice = c.fetchone()
+            c.execute("SELECT * FROM historico WHERE apolice_id = ? ORDER BY data_acao DESC", (apolice_id,))
+            historico = c.fetchall()
+            return apolice, historico
+    except Exception as e:
+        st.error(f"Erro ao buscar detalhes da apólice: {e}")
+        return None, []
 
 def login_user(email, senha):
     try:
@@ -215,6 +248,80 @@ def login_user(email, senha):
         return None
 
 # --- RENDERIZAÇÃO DA INTERFACE ---
+
+def render_dashboard():
+    """Renderiza a página do Painel de Controle."""
+    st.title("📊 Painel de Controle")
+    apolices_df = get_apolices()
+
+    if apolices_df.empty:
+        st.info("Nenhuma apólice cadastrada. Comece adicionando uma no menu 'Cadastrar Apólice'.")
+        return
+
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Total de Apólices", len(apolices_df))
+    pendentes_df = apolices_df[apolices_df['status'] == 'Pendente']
+    col2.metric("Apólices Pendentes", len(pendentes_df))
+    valor_pendente = pendentes_df['valor_da_parcela'].sum()
+    col3.metric("Valor Total Pendente", f"R${valor_pendente:,.2f}")
+    urgentes_df = apolices_df[apolices_df['dias_restantes'].fillna(999) <= 3]
+    col4.metric("Apólices Urgentes", len(urgentes_df), "Vencem em até 3 dias")
+    st.divider()
+    st.subheader("Apólices por Prioridade de Renovação")
+    # ... (código do dashboard)
+
+def render_consulta_apolices():
+    """Renderiza a página de consulta e filtro de apólices."""
+    st.title("🔍 Consultar Apólices")
+    apolices_df_raw = get_apolices()
+    if apolices_df_raw.empty:
+        st.info("Nenhuma apólice cadastrada no sistema.")
+        return
+    # ... (código da consulta)
+
+def render_gerenciamento_apolices():
+    """Renderiza a página para gerenciar uma apólice individualmente."""
+    st.title("🔄 Gerenciar Apólices")
+    apolices_df = get_apolices()
+    if apolices_df.empty:
+        st.info("Nenhuma apólice para gerenciar. Cadastre uma primeiro.")
+        return
+
+    apolice_options = {f"{row.get('numero_apolice', 'S/N')} - {row.get('cliente', '[Cliente não informado]')}": row['id'] for index, row in apolices_df.iterrows()}
+    selecionada_label = st.selectbox("Selecione uma apólice para editar:", apolice_options.keys())
+
+    if selecionada_label:
+        apolice_id = apolice_options[selecionada_label]
+        apolice, historico = get_apolice_details(apolice_id)
+        if not apolice:
+            st.error("Apólice não encontrada.")
+            return
+            
+        st.subheader(f"Editando Apólice: {apolice['numero_apolice']}")
+        
+        # Formulário para reenviar PDF
+        with st.form(f"form_reupload_{apolice_id}"):
+            st.write("Se esta apólice foi cadastrada sem um PDF, você pode adicioná-lo aqui.")
+            pdf_file = st.file_uploader("📎 Anexar novo PDF da Apólice", type=["pdf"], key=f"uploader_{apolice_id}")
+            submitted = st.form_submit_button("💾 Salvar PDF")
+            if submitted and pdf_file:
+                st.info("Fazendo upload do novo PDF para a nuvem...")
+                novo_caminho_pdf = salvar_pdf_gcs(pdf_file, apolice['numero_apolice'], apolice['cliente'])
+                if novo_caminho_pdf:
+                    update_data = {'caminho_pdf': novo_caminho_pdf}
+                    if update_apolice(apolice_id, update_data):
+                        st.success("PDF da apólice atualizado com sucesso!")
+                        st.rerun()
+                else:
+                    st.error("Falha ao fazer o upload do novo PDF.")
+        
+        st.divider()
+        if apolice['caminho_pdf']:
+            st.success("Esta apólice já possui um PDF na nuvem.")
+            st.markdown(f"**Link:** [Abrir PDF]({apolice['caminho_pdf']})")
+        else:
+            st.warning("Esta apólice ainda não possui um PDF associado.")
+
 
 def render_cadastro_form():
     """Renderiza o formulário para cadastrar uma nova apólice."""
@@ -341,13 +448,17 @@ def main():
             st.session_state.user_perfil = None
             st.rerun()
 
-    # Aqui você adicionaria as chamadas para as outras funções de renderização
-    if menu_opcao == "➕ Cadastrar Apólice":
+    if menu_opcao == "📊 Painel de Controle":
+        render_dashboard()
+    elif menu_opcao == "➕ Cadastrar Apólice":
         render_cadastro_form()
-    # Adicione as outras páginas aqui
-    # elif menu_opcao == "📊 Painel de Controle":
-    #     render_dashboard()
-    # etc.
+    elif menu_opcao == "🔍 Consultar Apólices":
+        render_consulta_apolices()
+    elif menu_opcao == "🔄 Gerenciar Apólices":
+        render_gerenciamento_apolices()
+    # Adicione a chamada para a página de configurações aqui, se necessário
+    # elif menu_opcao == "⚙️ Configurações" and st.session_state.user_perfil == 'admin':
+    #     render_configuracoes()
 
 if __name__ == "__main__":
     main()
