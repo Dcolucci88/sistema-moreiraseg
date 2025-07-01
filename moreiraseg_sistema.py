@@ -1,4 +1,5 @@
 # moreiraseg_sistema.py
+# Forçando a reinicialização para instalar as dependências
 import streamlit as st
 import sqlite3
 import pandas as pd
