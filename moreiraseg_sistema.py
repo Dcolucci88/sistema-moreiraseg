@@ -1,5 +1,4 @@
 # moreiraseg_sistema.py
-# Forçando a reinicialização para instalar as dependências
 import streamlit as st
 import sqlite3
 import pandas as pd
@@ -14,7 +13,7 @@ try:
     from google.cloud import storage
     from google.oauth2 import service_account
 except ImportError:
-    st.error("Biblioteca do Google Cloud não encontrada. Por favor, instale com: pip install google-cloud-storage google-auth")
+    st.error("Biblioteca do Google Cloud não encontrada. Verifique o seu ficheiro `requirements.txt`.")
     st.stop()
 
 
@@ -104,14 +103,10 @@ def salvar_pdf_gcs(uploaded_file, numero_apolice, cliente):
 
         blob = bucket.blob(destination_blob_name)
         
-        # Faz o upload do arquivo
         blob.upload_from_file(uploaded_file, content_type='application/pdf')
         
-        # **CORREÇÃO APLICADA AQUI**
-        # Torna o arquivo publicamente legível para que o link funcione
         blob.make_public()
 
-        # Retorna a URL pública do arquivo
         return blob.public_url
 
     except KeyError:
@@ -268,8 +263,25 @@ def render_dashboard():
     urgentes_df = apolices_df[apolices_df['dias_restantes'].fillna(999) <= 3]
     col4.metric("Apólices Urgentes", len(urgentes_df), "Vencem em até 3 dias")
     st.divider()
+    
     st.subheader("Apólices por Prioridade de Renovação")
-    # ... (código do dashboard)
+    prioridades_map = {
+        '🔥 Urgente': apolices_df[apolices_df['prioridade'] == '🔥 Urgente'], 
+        '⚠️ Alta': apolices_df[apolices_df['prioridade'] == '⚠️ Alta'], 
+        '⚠️ Média': apolices_df[apolices_df['prioridade'] == '⚠️ Média'], 
+        '✅ Baixa': apolices_df[apolices_df['prioridade'] == '✅ Baixa'],
+        '⚪ Indefinida': apolices_df[apolices_df['prioridade'] == '⚪ Indefinida']
+    }
+    
+    tabs = st.tabs(prioridades_map.keys())
+    cols_to_show = ['cliente', 'numero_apolice', 'tipo_seguro', 'dias_restantes', 'status']
+
+    for tab, (prioridade, df) in zip(tabs, prioridades_map.items()):
+        with tab:
+            if not df.empty:
+                st.dataframe(df[cols_to_show], use_container_width=True)
+            else:
+                st.info(f"Nenhuma apólice com prioridade '{prioridade.split(' ')[-1]}'.")
 
 def render_consulta_apolices():
     """Renderiza a página de consulta e filtro de apólices."""
@@ -278,7 +290,42 @@ def render_consulta_apolices():
     if apolices_df_raw.empty:
         st.info("Nenhuma apólice cadastrada no sistema.")
         return
-    # ... (código da consulta)
+
+    st.subheader("Filtros")
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        status_options = ["Todas"] + list(apolices_df_raw['status'].unique())
+        filtro_status = st.selectbox("Status", status_options)
+    with col2:
+        seguradora_options = ["Todas"] + list(apolices_df_raw['seguradora'].unique())
+        filtro_seguradora = st.selectbox("Seguradora", seguradora_options)
+    with col3:
+        tipo_options = ["Todos"] + list(apolices_df_raw['tipo_seguro'].unique())
+        filtro_tipo = st.selectbox("Tipo de Seguro", tipo_options)
+
+    apolices_df_filtrado = apolices_df_raw.copy()
+    if filtro_status != "Todas":
+        apolices_df_filtrado = apolices_df_filtrado[apolices_df_filtrado['status'] == filtro_status]
+    if filtro_seguradora != "Todas":
+        apolices_df_filtrado = apolices_df_filtrado[apolices_df_filtrado['seguradora'] == filtro_seguradora]
+    if filtro_tipo != "Todos":
+        apolices_df_filtrado = apolices_df_filtrado[apolices_df_filtrado['tipo_seguro'] == filtro_tipo]
+    
+    st.divider()
+
+    if not apolices_df_filtrado.empty:
+        cols_to_show = ['cliente', 'numero_apolice', 'seguradora', 'tipo_seguro', 'status', 'dias_restantes']
+        st.dataframe(apolices_df_filtrado[cols_to_show])
+        
+        csv_data = apolices_df_filtrado.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="📥 Exportar para CSV",
+            data=csv_data,
+            file_name=f"relatorio_apolices_{date.today()}.csv",
+            mime="text/csv",
+        )
+    else:
+        st.info("Nenhuma apólice encontrada com os filtros selecionados.")
 
 def render_gerenciamento_apolices():
     """Renderiza a página para gerenciar uma apólice individualmente."""
@@ -300,7 +347,6 @@ def render_gerenciamento_apolices():
             
         st.subheader(f"Editando Apólice: {apolice['numero_apolice']}")
         
-        # Formulário para reenviar PDF
         with st.form(f"form_reupload_{apolice_id}"):
             st.write("Se esta apólice foi cadastrada sem um PDF, você pode adicioná-lo aqui.")
             pdf_file = st.file_uploader("📎 Anexar novo PDF da Apólice", type=["pdf"], key=f"uploader_{apolice_id}")
@@ -322,7 +368,6 @@ def render_gerenciamento_apolices():
             st.markdown(f"**Link:** [Abrir PDF]({apolice['caminho_pdf']})")
         else:
             st.warning("Esta apólice ainda não possui um PDF associado.")
-
 
 def render_cadastro_form():
     """Renderiza o formulário para cadastrar uma nova apólice."""
@@ -403,7 +448,8 @@ def main():
         with col2:
             if os.path.exists(LOGO_PATH):
                 st.image(LOGO_PATH)
-            st.title("Sistema de Gestão de Apólices")
+            else:
+                st.title("Sistema de Gestão de Apólices")
             st.write("")
 
             with st.form("login_form"):
