@@ -518,28 +518,6 @@ def main():
             st.warning(f"Não foi possível carregar o logótipo principal: {e}")
     st.write("")
 
-    # --- FERRAMENTA DE DIAGNÓSTICO ---
-    with st.expander("Clique aqui para ver a estrutura de arquivos (Ferramenta de Diagnóstico)"):
-        st.write("Verificando a estrutura de arquivos que o Streamlit vê:")
-        try:
-            st.write("**Arquivos e pastas na raiz do projeto:**")
-            for item in os.listdir("."):
-                st.write(f"- `{item}`")
-
-            st.write(f"\n**Verificando a pasta '{ASSETS_DIR}':**")
-            if os.path.exists(ASSETS_DIR):
-                st.success(f"✅ A pasta '{ASSETS_DIR}' foi encontrada!")
-                st.write(f"**Conteúdo de '{ASSETS_DIR}':**")
-                for item in os.listdir(ASSETS_DIR):
-                    st.write(f"- `{item}`")
-            else:
-                st.error(f"❌ A pasta '{ASSETS_DIR}' NÃO foi encontrada na raiz do projeto.")
-
-        except Exception as e:
-            st.write(f"Erro ao listar arquivos: {e}")
-    st.divider()
-    # --- FIM DA FERRAMENTA DE DIAGNÓSTICO ---
-
     if menu_opcao == "📊 Painel de Controle":
         render_dashboard()
     elif menu_opcao == "➕ Cadastrar Apólice":
