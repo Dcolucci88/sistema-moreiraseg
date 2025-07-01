@@ -26,7 +26,7 @@ DB_NAME = "moreiraseg.db"
 # Caminhos relativos para os assets, usando o nome da sua pasta no GitHub
 ASSETS_DIR = "LogoTipo" 
 LOGO_PATH = os.path.join(ASSETS_DIR, "logo_azul.png")
-ICONE_PATH = os.path.join(ASSETS_DIR, "Icone.png") # Assumindo que o icone.png também está aqui
+ICONE_PATH = os.path.join(ASSETS_DIR, "icone.png") # Assumindo que o icone.png também está aqui
 
 # --- FUNÇÕES DE BANCO DE DADOS ---
 
