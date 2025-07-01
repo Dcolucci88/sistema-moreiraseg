@@ -23,6 +23,7 @@ except ImportError:
 DB_NAME = "moreiraseg.db"
 
 # Caminhos relativos para os assets
+# Certifique-se de que tem uma pasta chamada "assets" no seu repositório GitHub
 ASSETS_DIR = "assets"
 LOGO_PATH = os.path.join(ASSETS_DIR, "logo_azul.png")
 ICONE_PATH = os.path.join(ASSETS_DIR, "icone.png")
@@ -81,7 +82,7 @@ def init_db():
         st.error(f"❌ Falha ao inicializar o banco de dados: {e}")
         st.stop()
 
-# --- FUNÇÃO DE UPLOAD PARA O GOOGLE CLOUD STORAGE (CORRIGIDA) ---
+# --- FUNÇÃO DE UPLOAD PARA O GOOGLE CLOUD STORAGE ---
 
 def salvar_pdf_gcs(uploaded_file, numero_apolice, cliente):
     """
@@ -117,7 +118,7 @@ def salvar_pdf_gcs(uploaded_file, numero_apolice, cliente):
         st.error(f"❌ Falha no upload para o Google Cloud Storage: {e}")
         return None
 
-# --- FUNÇÕES RESTANTES DO SISTEMA ---
+# --- FUNÇÕES DE LÓGICA DO SISTEMA ---
 
 def add_historico(apolice_id, usuario_email, acao, detalhes=""):
     try:
@@ -248,126 +249,137 @@ def login_user(email, senha):
 def render_dashboard():
     """Renderiza a página do Painel de Controle."""
     st.title("📊 Painel de Controle")
-    apolices_df = get_apolices()
+    try:
+        apolices_df = get_apolices()
 
-    if apolices_df.empty:
-        st.info("Nenhuma apólice cadastrada. Comece adicionando uma no menu 'Cadastrar Apólice'.")
-        return
+        if apolices_df.empty:
+            st.info("Nenhuma apólice cadastrada. Comece adicionando uma no menu 'Cadastrar Apólice'.")
+            return
 
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Total de Apólices", len(apolices_df))
-    pendentes_df = apolices_df[apolices_df['status'] == 'Pendente']
-    col2.metric("Apólices Pendentes", len(pendentes_df))
-    valor_pendente = pendentes_df['valor_da_parcela'].sum()
-    col3.metric("Valor Total Pendente", f"R${valor_pendente:,.2f}")
-    urgentes_df = apolices_df[apolices_df['dias_restantes'].fillna(999) <= 3]
-    col4.metric("Apólices Urgentes", len(urgentes_df), "Vencem em até 3 dias")
-    st.divider()
-    
-    st.subheader("Apólices por Prioridade de Renovação")
-    prioridades_map = {
-        '🔥 Urgente': apolices_df[apolices_df['prioridade'] == '🔥 Urgente'], 
-        '⚠️ Alta': apolices_df[apolices_df['prioridade'] == '⚠️ Alta'], 
-        '⚠️ Média': apolices_df[apolices_df['prioridade'] == '⚠️ Média'], 
-        '✅ Baixa': apolices_df[apolices_df['prioridade'] == '✅ Baixa'],
-        '⚪ Indefinida': apolices_df[apolices_df['prioridade'] == '⚪ Indefinida']
-    }
-    
-    tabs = st.tabs(prioridades_map.keys())
-    cols_to_show = ['cliente', 'numero_apolice', 'tipo_seguro', 'dias_restantes', 'status']
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Total de Apólices", len(apolices_df))
+        pendentes_df = apolices_df[apolices_df['status'] == 'Pendente']
+        col2.metric("Apólices Pendentes", len(pendentes_df))
+        valor_pendente = pendentes_df['valor_da_parcela'].sum()
+        col3.metric("Valor Total Pendente", f"R${valor_pendente:,.2f}")
+        urgentes_df = apolices_df[apolices_df['dias_restantes'].fillna(999) <= 3]
+        col4.metric("Apólices Urgentes", len(urgentes_df), "Vencem em até 3 dias")
+        st.divider()
+        
+        st.subheader("Apólices por Prioridade de Renovação")
+        prioridades_map = {
+            '🔥 Urgente': apolices_df[apolices_df['prioridade'] == '🔥 Urgente'], 
+            '⚠️ Alta': apolices_df[apolices_df['prioridade'] == '⚠️ Alta'], 
+            '⚠️ Média': apolices_df[apolices_df['prioridade'] == '⚠️ Média'], 
+            '✅ Baixa': apolices_df[apolices_df['prioridade'] == '✅ Baixa'],
+            '⚪ Indefinida': apolices_df[apolices_df['prioridade'] == '⚪ Indefinida']
+        }
+        
+        tabs = st.tabs(prioridades_map.keys())
+        cols_to_show = ['cliente', 'numero_apolice', 'tipo_seguro', 'dias_restantes', 'status']
 
-    for tab, (prioridade, df) in zip(tabs, prioridades_map.items()):
-        with tab:
-            if not df.empty:
-                st.dataframe(df[cols_to_show], use_container_width=True)
-            else:
-                st.info(f"Nenhuma apólice com prioridade '{prioridade.split(' ')[-1]}'.")
+        for tab, (prioridade, df) in zip(tabs, prioridades_map.items()):
+            with tab:
+                if not df.empty:
+                    st.dataframe(df[cols_to_show], use_container_width=True)
+                else:
+                    st.info(f"Nenhuma apólice com prioridade '{prioridade.split(' ')[-1]}'.")
+    except Exception as e:
+        st.error(f"Ocorreu um erro ao renderizar o Painel de Controle: {e}")
 
 def render_consulta_apolices():
     """Renderiza a página de consulta e filtro de apólices."""
     st.title("🔍 Consultar Apólices")
-    apolices_df_raw = get_apolices()
-    if apolices_df_raw.empty:
-        st.info("Nenhuma apólice cadastrada no sistema.")
-        return
+    try:
+        apolices_df_raw = get_apolices()
+        if apolices_df_raw.empty:
+            st.info("Nenhuma apólice cadastrada no sistema.")
+            return
 
-    st.subheader("Filtros")
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        status_options = ["Todas"] + list(apolices_df_raw['status'].unique())
-        filtro_status = st.selectbox("Status", status_options)
-    with col2:
-        seguradora_options = ["Todas"] + list(apolices_df_raw['seguradora'].unique())
-        filtro_seguradora = st.selectbox("Seguradora", seguradora_options)
-    with col3:
-        tipo_options = ["Todos"] + list(apolices_df_raw['tipo_seguro'].unique())
-        filtro_tipo = st.selectbox("Tipo de Seguro", tipo_options)
+        st.subheader("Filtros")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            status_options = ["Todas"] + list(apolices_df_raw['status'].unique())
+            filtro_status = st.selectbox("Status", status_options)
+        with col2:
+            seguradora_options = ["Todas"] + list(apolices_df_raw['seguradora'].unique())
+            filtro_seguradora = st.selectbox("Seguradora", seguradora_options)
+        with col3:
+            tipo_options = ["Todos"] + list(apolices_df_raw['tipo_seguro'].unique())
+            filtro_tipo = st.selectbox("Tipo de Seguro", tipo_options)
 
-    apolices_df_filtrado = apolices_df_raw.copy()
-    if filtro_status != "Todas":
-        apolices_df_filtrado = apolices_df_filtrado[apolices_df_filtrado['status'] == filtro_status]
-    if filtro_seguradora != "Todas":
-        apolices_df_filtrado = apolices_df_filtrado[apolices_df_filtrado['seguradora'] == filtro_seguradora]
-    if filtro_tipo != "Todos":
-        apolices_df_filtrado = apolices_df_filtrado[apolices_df_filtrado['tipo_seguro'] == filtro_tipo]
-    
-    st.divider()
-
-    if not apolices_df_filtrado.empty:
-        cols_to_show = ['cliente', 'numero_apolice', 'seguradora', 'tipo_seguro', 'status', 'dias_restantes']
-        st.dataframe(apolices_df_filtrado[cols_to_show])
+        apolices_df_filtrado = apolices_df_raw.copy()
+        if filtro_status != "Todas":
+            apolices_df_filtrado = apolices_df_filtrado[apolices_df_filtrado['status'] == filtro_status]
+        if filtro_seguradora != "Todas":
+            apolices_df_filtrado = apolices_df_filtrado[apolices_df_filtrado['seguradora'] == filtro_seguradora]
+        if filtro_tipo != "Todos":
+            apolices_df_filtrado = apolices_df_filtrado[apolices_df_filtrado['tipo_seguro'] == filtro_tipo]
         
-        csv_data = apolices_df_filtrado.to_csv(index=False).encode('utf-8')
-        st.download_button(
-            label="📥 Exportar para CSV",
-            data=csv_data,
-            file_name=f"relatorio_apolices_{date.today()}.csv",
-            mime="text/csv",
-        )
-    else:
-        st.info("Nenhuma apólice encontrada com os filtros selecionados.")
+        st.divider()
+
+        if not apolices_df_filtrado.empty:
+            cols_to_show = ['cliente', 'numero_apolice', 'seguradora', 'tipo_seguro', 'status', 'dias_restantes']
+            st.dataframe(apolices_df_filtrado[cols_to_show], use_container_width=True)
+            
+            csv_data = apolices_df_filtrado.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="📥 Exportar para CSV",
+                data=csv_data,
+                file_name=f"relatorio_apolices_{date.today()}.csv",
+                mime="text/csv",
+            )
+        else:
+            st.info("Nenhuma apólice encontrada com os filtros selecionados.")
+    except Exception as e:
+        st.error(f"Ocorreu um erro ao renderizar a página de consulta: {e}")
+
 
 def render_gerenciamento_apolices():
     """Renderiza a página para gerenciar uma apólice individualmente."""
     st.title("🔄 Gerenciar Apólices")
-    apolices_df = get_apolices()
-    if apolices_df.empty:
-        st.info("Nenhuma apólice para gerenciar. Cadastre uma primeiro.")
-        return
-
-    apolice_options = {f"{row.get('numero_apolice', 'S/N')} - {row.get('cliente', '[Cliente não informado]')}": row['id'] for index, row in apolices_df.iterrows()}
-    selecionada_label = st.selectbox("Selecione uma apólice para editar:", apolice_options.keys())
-
-    if selecionada_label:
-        apolice_id = apolice_options[selecionada_label]
-        apolice, historico = get_apolice_details(apolice_id)
-        if not apolice:
-            st.error("Apólice não encontrada.")
+    try:
+        apolices_df = get_apolices()
+        if apolices_df.empty:
+            st.info("Nenhuma apólice para gerenciar. Cadastre uma primeiro.")
             return
+
+        apolice_options = {f"{row.get('numero_apolice', 'S/N')} - {row.get('cliente', '[Cliente não informado]')}": row['id'] for index, row in apolices_df.iterrows()}
+        selecionada_label = st.selectbox("Selecione uma apólice para editar:", apolice_options.keys())
+
+        if selecionada_label:
+            apolice_id = apolice_options[selecionada_label]
+            apolice, historico = get_apolice_details(apolice_id)
+            if not apolice:
+                st.error("Apólice não encontrada.")
+                return
+                
+            st.subheader(f"Editando Apólice: {apolice['numero_apolice']}")
             
-        st.subheader(f"Editando Apólice: {apolice['numero_apolice']}")
-        
-        with st.form(f"form_reupload_{apolice_id}"):
-            st.write("Se esta apólice foi cadastrada sem um PDF, você pode adicioná-lo aqui.")
-            pdf_file = st.file_uploader("📎 Anexar novo PDF da Apólice", type=["pdf"], key=f"uploader_{apolice_id}")
-            submitted = st.form_submit_button("💾 Salvar PDF")
-            if submitted and pdf_file:
-                st.info("Fazendo upload do novo PDF para a nuvem...")
-                novo_caminho_pdf = salvar_pdf_gcs(pdf_file, apolice['numero_apolice'], apolice['cliente'])
-                if novo_caminho_pdf:
-                    update_data = {'caminho_pdf': novo_caminho_pdf}
-                    if update_apolice(apolice_id, update_data):
-                        st.success("PDF da apólice atualizado com sucesso!")
-                        st.rerun()
-                else:
-                    st.error("Falha ao fazer o upload do novo PDF.")
-        
-        st.divider()
-        if apolice['caminho_pdf']:
-            st.success("Esta apólice já possui um PDF na nuvem.")
-            st.markdown(f"**Link:** [Abrir PDF]({apolice['caminho_pdf']})")
-        else:
-            st.warning("Esta apólice ainda não possui um PDF associado.")
+            with st.form(f"form_reupload_{apolice_id}"):
+                st.write("Se esta apólice foi cadastrada sem um PDF, você pode adicioná-lo aqui.")
+                pdf_file = st.file_uploader("📎 Anexar novo PDF da Apólice", type=["pdf"], key=f"uploader_{apolice_id}")
+                submitted = st.form_submit_button("💾 Salvar PDF")
+                if submitted and pdf_file:
+                    st.info("Fazendo upload do novo PDF para a nuvem...")
+                    novo_caminho_pdf = salvar_pdf_gcs(pdf_file, apolice['numero_apolice'], apolice['cliente'])
+                    if novo_caminho_pdf:
+                        update_data = {'caminho_pdf': novo_caminho_pdf}
+                        if update_apolice(apolice_id, update_data):
+                            st.success("PDF da apólice atualizado com sucesso!")
+                            st.rerun()
+                    else:
+                        st.error("Falha ao fazer o upload do novo PDF.")
+            
+            st.divider()
+            if apolice['caminho_pdf']:
+                st.success("Esta apólice já possui um PDF na nuvem.")
+                st.markdown(f"**Link:** [Abrir PDF]({apolice['caminho_pdf']})")
+            else:
+                st.warning("Esta apólice ainda não possui um PDF associado.")
+    except Exception as e:
+        st.error(f"Ocorreu um erro ao renderizar a página de gerenciamento: {e}")
+
 
 def render_cadastro_form():
     """Renderiza o formulário para cadastrar uma nova apólice."""
@@ -446,9 +458,9 @@ def main():
     if not st.session_state.user_email:
         col1, col2, col3 = st.columns([1, 1.5, 1])
         with col2:
-            if os.path.exists(LOGO_PATH):
+            try:
                 st.image(LOGO_PATH)
-            else:
+            except Exception:
                 st.title("Sistema de Gestão de Apólices")
             st.write("")
 
@@ -471,8 +483,10 @@ def main():
         return
 
     with st.sidebar:
-        if os.path.exists(ICONE_PATH):
+        try:
             st.image(ICONE_PATH, width=80)
+        except Exception:
+            st.title("Menu")
         st.title(f"Olá, {st.session_state.user_nome.split()[0]}!")
         st.write(f"Perfil: `{st.session_state.user_perfil.capitalize()}`")
         st.divider()
