@@ -26,7 +26,7 @@ DB_NAME = "moreiraseg.db"
 # Caminhos relativos para os assets, usando o nome da sua pasta no GitHub
 ASSETS_DIR = "LogoTipo" 
 LOGO_PATH = os.path.join(ASSETS_DIR, "logo_azul.png")
-ICONE_PATH = os.path.join(ASSETS_DIR, "icone.png") # Assumindo que o icone.png também está aqui
+ICONE_PATH = os.path.join(ASSETS_DIR, "Icone.png") # Assumindo que o icone.png também está aqui
 
 # --- FUNÇÕES DE BANCO DE DADOS ---
 
@@ -443,7 +443,7 @@ def main():
     """Função principal que renderiza a aplicação Streamlit."""
     st.set_page_config(
         page_title="Moreiraseg - Gestão de Apólices",
-        page_icon="📊",
+        page_icon=ICONE_PATH, # Usa o ícone na aba do navegador
         layout="wide",
         initial_sidebar_state="expanded"
     )
@@ -459,8 +459,8 @@ def main():
         col1, col2, col3 = st.columns([1, 1.5, 1])
         with col2:
             try:
-                # Tenta carregar a imagem. Se falhar, mostra o título.
-                st.image(LOGO_PATH)
+                # --- ALTERAÇÃO 1: Imagem na página de login ---
+                st.image(ICONE_PATH, width=150)
             except Exception:
                 st.title("Sistema de Gestão de Apólices")
             st.write("")
@@ -483,13 +483,17 @@ def main():
             st.info("Para testes, use: `adm@moreiraseg.com.br` / `Salmo@139`")
         return
 
+    # --- Layout após o login ---
     with st.sidebar:
+        st.title(f"Olá, {st.session_state.user_nome.split()[0]}!")
+        st.write(f"Perfil: `{st.session_state.user_perfil.capitalize()}`")
+        
+        # --- ALTERAÇÃO 2: Imagem na barra lateral ---
         try:
             st.image(ICONE_PATH, width=80)
         except Exception:
-            st.title("Menu")
-        st.title(f"Olá, {st.session_state.user_nome.split()[0]}!")
-        st.write(f"Perfil: `{st.session_state.user_perfil.capitalize()}`")
+            st.write("Menu") # Fallback se a imagem não carregar
+        
         st.divider()
 
         menu_options = [
@@ -510,7 +514,16 @@ def main():
             st.session_state.user_perfil = None
             st.rerun()
 
-    # Bloco de execução principal - CORRIGIDO E COMPLETO
+    # --- ALTERAÇÃO 3: Logótipo centralizado na página principal ---
+    col1, col2, col3 = st.columns([2, 3, 2])
+    with col2:
+        try:
+            st.image(LOGO_PATH)
+        except Exception as e:
+            st.warning(f"Não foi possível carregar o logótipo principal: {e}")
+    st.write("") # Adiciona um espaço
+
+    # Bloco de execução principal - COMPLETO
     if menu_opcao == "📊 Painel de Controle":
         render_dashboard()
     elif menu_opcao == "➕ Cadastrar Apólice":
@@ -525,4 +538,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
