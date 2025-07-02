@@ -90,6 +90,12 @@ def salvar_pdf_gcs(uploaded_file, numero_apolice, cliente):
     try:
         creds_json_str = st.secrets["gcs_credentials"]
         creds_info = json.loads(creds_json_str)
+        
+        # --- CORREÇÃO DEFINITIVA PARA O ERRO "INCORRECT PADDING" ---
+        # Reformata a chave privada para garantir que as quebras de linha sejam interpretadas corretamente.
+        creds_info['private_key'] = creds_info['private_key'].replace('\\n', '\n')
+        # --- FIM DA CORREÇÃO ---
+
         credentials = service_account.Credentials.from_service_account_info(creds_info)
         
         bucket_name = st.secrets["gcs_bucket_name"]
@@ -584,4 +590,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
