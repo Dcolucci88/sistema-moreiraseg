@@ -81,23 +81,19 @@ def init_db():
         st.error(f"❌ Falha ao inicializar o banco de dados: {e}")
         st.stop()
 
-# --- FUNÇÃO DE UPLOAD PARA O GOOGLE CLOUD STORAGE (CORREÇÃO DEFINITIVA) ---
+# --- FUNÇÃO DE UPLOAD PARA O GOOGLE CLOUD STORAGE (CORREÇÃO FINAL) ---
 
 def salvar_pdf_gcs(uploaded_file, numero_apolice, cliente):
     """
     Faz o upload de um arquivo PDF para o Google Cloud Storage e retorna a URL pública.
     """
     try:
-        # 1. Carrega o segredo como uma string de texto.
-        creds_json_str = st.secrets["gcs_credentials"]
+        # --- CORREÇÃO DEFINITIVA PARA O ERRO "the JSON object must be str... not AttrDict" ---
+        # O Streamlit já analisa o segredo TOML para um objeto tipo dicionário (AttrDict).
+        # Apenas o convertemos para um dicionário padrão do Python.
+        creds_info = dict(st.secrets["gcs_credentials"])
+        # --- FIM DA CORREÇÃO ---
 
-        # 2. Converte a string num dicionário Python (JSON).
-        creds_info = json.loads(creds_json_str)
-        
-        # 3. Corrige a formatação da chave privada para evitar o erro "Incorrect Padding".
-        creds_info['private_key'] = creds_info['private_key'].replace('\\n', '\n')
-
-        # 4. Cria as credenciais a partir do dicionário já corrigido.
         credentials = service_account.Credentials.from_service_account_info(creds_info)
         
         bucket_name = st.secrets["gcs_bucket_name"]
@@ -591,6 +587,5 @@ def main():
 
 if __name__ == "__main__":
     main()
-
 
 
