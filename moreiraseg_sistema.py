@@ -81,19 +81,29 @@ def init_db():
         st.error(f"❌ Falha ao inicializar o banco de dados: {e}")
         st.stop()
 
-# --- FUNÇÃO DE UPLOAD PARA O GOOGLE CLOUD STORAGE ---
+# --- FUNÇÃO DE UPLOAD PARA O GOOGLE CLOUD STORAGE (NOVA CORREÇÃO) ---
 
 def salvar_pdf_gcs(uploaded_file, numero_apolice, cliente):
     """
     Faz o upload de um arquivo PDF para o Google Cloud Storage e retorna a URL pública.
     """
     try:
-        creds_json_str = st.secrets["gcs_credentials"]
-        creds_info = json.loads(creds_json_str)
-        
-        # --- CORREÇÃO DEFINITIVA PARA O ERRO "INCORRECT PADDING" ---
-        # Reformata a chave privada para garantir que as quebras de linha sejam interpretadas corretamente.
-        creds_info['private_key'] = creds_info['private_key'].replace('\\n', '\n')
+        # --- CORREÇÃO ROBUSTA PARA O ERRO "INCORRECT PADDING" ---
+        # Em vez de carregar o JSON inteiro, construímos o dicionário de credenciais
+        # a partir de cada segredo individualmente. Isso evita problemas de formatação.
+        creds_info = {
+            "type": st.secrets["gcs_credentials"]["type"],
+            "project_id": st.secrets["gcs_credentials"]["project_id"],
+            "private_key_id": st.secrets["gcs_credentials"]["private_key_id"],
+            "private_key": st.secrets["gcs_credentials"]["private_key"],
+            "client_email": st.secrets["gcs_credentials"]["client_email"],
+            "client_id": st.secrets["gcs_credentials"]["client_id"],
+            "auth_uri": st.secrets["gcs_credentials"]["auth_uri"],
+            "token_uri": st.secrets["gcs_credentials"]["token_uri"],
+            "auth_provider_x509_cert_url": st.secrets["gcs_credentials"]["auth_provider_x509_cert_url"],
+            "client_x509_cert_url": st.secrets["gcs_credentials"]["client_x509_cert_url"],
+            "universe_domain": st.secrets["gcs_credentials"]["universe_domain"]
+        }
         # --- FIM DA CORREÇÃO ---
 
         credentials = service_account.Credentials.from_service_account_info(creds_info)
@@ -115,9 +125,8 @@ def salvar_pdf_gcs(uploaded_file, numero_apolice, cliente):
 
         return blob.public_url
 
-    except KeyError:
-        st.error("Credenciais do Google Cloud Storage ou nome do bucket não configurados nos 'Secrets' do Streamlit.")
-        st.info("Por favor, siga as instruções de configuração para adicionar 'gcs_credentials' e 'gcs_bucket_name' aos segredos do seu app.")
+    except KeyError as e:
+        st.error(f"Erro de chave nos 'Secrets': A chave '{e}' não foi encontrada. Verifique a sua configuração.")
         return None
     except Exception as e:
         st.error(f"❌ Falha no upload para o Google Cloud Storage: {e}")
@@ -590,5 +599,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
