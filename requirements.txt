@@ -2,3 +2,4 @@ streamlit
 pandas
 google-cloud-storage
 google-auth
+psycopg2-binary
