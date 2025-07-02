@@ -81,31 +81,23 @@ def init_db():
         st.error(f"❌ Falha ao inicializar o banco de dados: {e}")
         st.stop()
 
-# --- FUNÇÃO DE UPLOAD PARA O GOOGLE CLOUD STORAGE (NOVA CORREÇÃO) ---
+# --- FUNÇÃO DE UPLOAD PARA O GOOGLE CLOUD STORAGE (CORREÇÃO DEFINITIVA) ---
 
 def salvar_pdf_gcs(uploaded_file, numero_apolice, cliente):
     """
     Faz o upload de um arquivo PDF para o Google Cloud Storage e retorna a URL pública.
     """
     try:
-        # --- CORREÇÃO ROBUSTA PARA O ERRO "INCORRECT PADDING" ---
-        # Em vez de carregar o JSON inteiro, construímos o dicionário de credenciais
-        # a partir de cada segredo individualmente. Isso evita problemas de formatação.
-        creds_info = {
-            "type": st.secrets["gcs_credentials"]["type"],
-            "project_id": st.secrets["gcs_credentials"]["project_id"],
-            "private_key_id": st.secrets["gcs_credentials"]["private_key_id"],
-            "private_key": st.secrets["gcs_credentials"]["private_key"],
-            "client_email": st.secrets["gcs_credentials"]["client_email"],
-            "client_id": st.secrets["gcs_credentials"]["client_id"],
-            "auth_uri": st.secrets["gcs_credentials"]["auth_uri"],
-            "token_uri": st.secrets["gcs_credentials"]["token_uri"],
-            "auth_provider_x509_cert_url": st.secrets["gcs_credentials"]["auth_provider_x509_cert_url"],
-            "client_x509_cert_url": st.secrets["gcs_credentials"]["client_x509_cert_url"],
-            "universe_domain": st.secrets["gcs_credentials"]["universe_domain"]
-        }
-        # --- FIM DA CORREÇÃO ---
+        # 1. Carrega o segredo como uma string de texto.
+        creds_json_str = st.secrets["gcs_credentials"]
 
+        # 2. Converte a string num dicionário Python (JSON).
+        creds_info = json.loads(creds_json_str)
+        
+        # 3. Corrige a formatação da chave privada para evitar o erro "Incorrect Padding".
+        creds_info['private_key'] = creds_info['private_key'].replace('\\n', '\n')
+
+        # 4. Cria as credenciais a partir do dicionário já corrigido.
         credentials = service_account.Credentials.from_service_account_info(creds_info)
         
         bucket_name = st.secrets["gcs_bucket_name"]
