@@ -215,7 +215,7 @@ def add_apolice(data):
                     data.get('valor_primeira_parcela'), data['valor_da_parcela'], data.get('comissao', 0.0),
                     data['data_inicio_de_vigencia'], data['data_final_de_vigencia'],
                     data['contato'], data.get('email', ''), data.get('observacoes', ''),
-                    data.get('status', 'Ativa'), # CORREÇÃO: Status padrão agora é 'Ativa'
+                    data.get('status', 'Ativa'),
                     data.get('caminho_pdf', '')
                 ))
                 apolice_id = c.fetchone()[0]
@@ -270,9 +270,16 @@ def get_apolices(search_term=None):
         return pd.DataFrame()
 
     if not df.empty:
-        # CORREÇÃO: Cálculo de dias restantes mais robusto
-        df['data_final_de_vigencia'] = pd.to_datetime(df['data_final_de_vigencia']).dt.date
-        df['dias_restantes'] = (df['data_final_de_vigencia'] - date.today()).dt.days
+        # --- CORREÇÃO DEFINITIVA PARA O ERRO DE DATAS ---
+        # Converte a coluna para datetime, tratando possíveis erros
+        df['data_final_de_vigencia_dt'] = pd.to_datetime(df['data_final_de_vigencia'], errors='coerce')
+        
+        # Calcula os dias restantes apenas para as linhas onde a conversão foi bem-sucedida
+        today_date = date.today()
+        df['dias_restantes'] = df['data_final_de_vigencia_dt'].apply(
+            lambda x: (x.date() - today_date).days if pd.notnull(x) else None
+        )
+        # --- FIM DA CORREÇÃO ---
         
         def define_prioridade(dias):
             if pd.isna(dias): return '⚪ Indefinida'
@@ -281,6 +288,7 @@ def get_apolices(search_term=None):
             elif dias <= 20: return '⚠️ Média'
             else: return '✅ Baixa'
         df['prioridade'] = df['dias_restantes'].apply(define_prioridade)
+        df.drop(columns=['data_final_de_vigencia_dt'], inplace=True)
     return df
     
 def get_apolice_details(apolice_id):
