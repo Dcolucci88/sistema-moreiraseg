@@ -54,7 +54,7 @@ def init_db():
     try:
         with get_connection() as conn:
             with conn.cursor() as c:
-                # Criação da tabela principal
+                # Criação da tabela principal com status 'Ativa' como padrão
                 c.execute('''
                     CREATE TABLE IF NOT EXISTS apolices (
                         id SERIAL PRIMARY KEY,
@@ -63,7 +63,7 @@ def init_db():
                         valor_da_parcela REAL NOT NULL,
                         comissao REAL, data_inicio_de_vigencia DATE NOT NULL, data_final_de_vigencia DATE NOT NULL,
                         contato TEXT NOT NULL, email TEXT, observacoes TEXT,
-                        status TEXT NOT NULL DEFAULT 'Pendente', caminho_pdf TEXT,
+                        status TEXT NOT NULL DEFAULT 'Ativa', caminho_pdf TEXT,
                         data_cadastro TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
                         data_atualizacao TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
                     )
@@ -215,7 +215,8 @@ def add_apolice(data):
                     data.get('valor_primeira_parcela'), data['valor_da_parcela'], data.get('comissao', 0.0),
                     data['data_inicio_de_vigencia'], data['data_final_de_vigencia'],
                     data['contato'], data.get('email', ''), data.get('observacoes', ''),
-                    data.get('status', 'Pendente'), data.get('caminho_pdf', '')
+                    data.get('status', 'Ativa'), # CORREÇÃO: Status padrão agora é 'Ativa'
+                    data.get('caminho_pdf', '')
                 ))
                 apolice_id = c.fetchone()[0]
             conn.commit()
@@ -269,8 +270,10 @@ def get_apolices(search_term=None):
         return pd.DataFrame()
 
     if not df.empty:
-        df['data_final_de_vigencia_dt'] = pd.to_datetime(df['data_final_de_vigencia'], errors='coerce')
-        df['dias_restantes'] = (df['data_final_de_vigencia_dt'] - pd.Timestamp.now(df['data_final_de_vigencia_dt'].dt.tz)).dt.days
+        # CORREÇÃO: Cálculo de dias restantes mais robusto
+        df['data_final_de_vigencia'] = pd.to_datetime(df['data_final_de_vigencia']).dt.date
+        df['dias_restantes'] = (df['data_final_de_vigencia'] - date.today()).dt.days
+        
         def define_prioridade(dias):
             if pd.isna(dias): return '⚪ Indefinida'
             if dias <= 3: return '🔥 Urgente'
@@ -278,7 +281,6 @@ def get_apolices(search_term=None):
             elif dias <= 20: return '⚠️ Média'
             else: return '✅ Baixa'
         df['prioridade'] = df['dias_restantes'].apply(define_prioridade)
-        df.drop(columns=['data_final_de_vigencia_dt'], inplace=True)
     return df
     
 def get_apolice_details(apolice_id):
@@ -458,7 +460,7 @@ def render_cadastro_form():
                 'valor_da_parcela': valor_demais_parcelas, 'comissao': comissao, 
                 'data_inicio_de_vigencia': data_inicio, 'data_final_de_vigencia': data_fim, 
                 'contato': contato, 'email': email, 'observacoes': observacoes, 
-                'status': 'Pendente', 'caminho_pdf': caminho_pdf_apolice if caminho_pdf_apolice else ""
+                'status': 'Ativa', 'caminho_pdf': caminho_pdf_apolice if caminho_pdf_apolice else ""
             }
             apolice_id = add_apolice(apolice_data)
             if apolice_id:
@@ -612,3 +614,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
