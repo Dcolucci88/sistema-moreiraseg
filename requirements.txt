@@ -1,7 +1,10 @@
+# Dependências do Streamlit
 streamlit
 pandas
 google-cloud-storage
 google-auth
-psycopg2-binary
+
+# Dependências da API
 fastapi
 uvicorn[standard]
+psycopg2-binary
