@@ -290,11 +290,14 @@ def get_apolices(search_term=None):
     # Filtra os dados localmente se um termo de pesquisa for fornecido
     if search_term:
         term = search_term.lower()
-        df = df[
+        # Garante que as colunas existem antes de tentar filtrar
+        df_filtered = df[
             (df['numero_apolice'].astype(str).str.lower().str.contains(term)) |
-            (df['cliente'].astype(str).str.lower().str.contains(term)) |
-            (df['placa'].astype(str).str.lower().str.contains(term))
+            (df['cliente'].astype(str).str.lower().str.contains(term))
         ]
+        if 'placa' in df.columns:
+            df_filtered = df_filtered | (df['placa'].astype(str).str.lower().str.contains(term))
+        df = df_filtered
 
     df['data_final_de_vigencia'] = pd.to_datetime(df['data_final_de_vigencia'], errors='coerce')
     today_date = date.today()
