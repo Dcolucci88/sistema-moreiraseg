@@ -1,5 +1,5 @@
 # moreiraseg_sistema.py
-# VERSÃO FINAL, COMPLETA E CORRIGIDA
+# VERSÃO COM FUNCIONALIDADE DE APAGAR APÓLICE
 
 import streamlit as st
 import pandas as pd
@@ -254,6 +254,21 @@ def update_apolice(apolice_id, update_data):
         st.error(f"❌ Erro ao atualizar a apólice: {e}")
         return False
 
+def delete_apolice(apolice_id):
+    """Apaga uma apólice e os seus registos associados do banco de dados."""
+    try:
+        with get_connection() as conn:
+            with conn.cursor() as c:
+                # Graças ao 'ON DELETE CASCADE', apagar a apólice irá apagar
+                # automaticamente os registos em 'historico' e 'boletos'.
+                c.execute("DELETE FROM apolices WHERE id = %s", (apolice_id,))
+            conn.commit()
+            add_historico(apolice_id, st.session_state.get('user_email', 'sistema'), 'Exclusão', f"Apólice ID {apolice_id} apagada.")
+            return True
+    except Exception as e:
+        st.error(f"❌ Erro ao apagar a apólice: {e}")
+        return False
+
 def get_apolices(search_term=None):
     try:
         with get_connection() as conn:
@@ -407,6 +422,16 @@ def render_pesquisa_e_edicao():
                                     add_boletos_db(apolice_id, [(novo_caminho_boleto[0], boleto_pdf_file.name)])
                                     st.success("Novo boleto anexado com sucesso!")
                                     st.rerun()
+                    
+                    st.divider()
+                    st.subheader("Zona de Perigo")
+                    with st.form(f"delete_form_{apolice_id}"):
+                        st.warning("Atenção: Apagar uma apólice é uma ação permanente e não pode ser desfeita.")
+                        delete_submitted = st.form_submit_button("🗑️ Apagar Apólice Permanentemente")
+                        if delete_submitted:
+                            if delete_apolice(apolice_id):
+                                st.success("Apólice apagada com sucesso!")
+                                st.rerun()
 
 def render_cadastro_form():
     st.title("➕ Cadastrar Nova Apólice")
