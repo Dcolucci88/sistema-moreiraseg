@@ -1,5 +1,5 @@
 # moreiraseg_sistema.py
-# VERSÃO COM FUNCIONALIDADE DE APAGAR APÓLICE
+# VERSÃO COM CORREÇÃO DEFINITIVA DA EXCLUSÃO DE DADOS
 
 import streamlit as st
 import pandas as pd
@@ -49,12 +49,12 @@ def get_connection():
 
 def init_db():
     """
-    Inicializa o banco de dados PostgreSQL, cria e atualiza as tabelas conforme necessário.
+    Inicializa o banco de dados PostgreSQL, cria e atualiza as tabelas e restrições conforme necessário.
     """
     try:
         with get_connection() as conn:
             with conn.cursor() as c:
-                # Criação da tabela principal com status 'Ativa' como padrão
+                # Criação das tabelas se não existirem
                 c.execute('''
                     CREATE TABLE IF NOT EXISTS apolices (
                         id SERIAL PRIMARY KEY,
@@ -68,22 +68,6 @@ def init_db():
                         data_atualizacao TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
                     )
                 ''')
-
-                # Verifica e adiciona as novas colunas se elas não existirem
-                colunas_para_adicionar = {
-                    "tipo_cobranca": "TEXT",
-                    "numero_parcelas": "INTEGER",
-                    "valor_primeira_parcela": "REAL"
-                }
-                for coluna, tipo in colunas_para_adicionar.items():
-                    c.execute("""
-                        SELECT column_name 
-                        FROM information_schema.columns 
-                        WHERE table_name='apolices' AND column_name=%s
-                    """, (coluna,))
-                    if not c.fetchone():
-                        c.execute(f"ALTER TABLE apolices ADD COLUMN {coluna} {tipo}")
-                        st.toast(f"Coluna '{coluna}' adicionada ao banco de dados.", icon="✅")
                 
                 c.execute('''
                     CREATE TABLE IF NOT EXISTS boletos (
@@ -91,8 +75,7 @@ def init_db():
                         apolice_id INTEGER NOT NULL,
                         caminho_pdf TEXT NOT NULL,
                         nome_arquivo TEXT,
-                        data_upload TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-                        FOREIGN KEY (apolice_id) REFERENCES apolices(id) ON DELETE CASCADE
+                        data_upload TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
                     )
                 ''')
 
@@ -103,8 +86,7 @@ def init_db():
                         usuario TEXT NOT NULL,
                         acao TEXT NOT NULL,
                         detalhes TEXT,
-                        data_acao TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-                        FOREIGN KEY (apolice_id) REFERENCES apolices(id) ON DELETE CASCADE
+                        data_acao TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
                     )
                 ''')
                 c.execute('''
@@ -117,6 +99,26 @@ def init_db():
                         data_cadastro TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
                     )
                 ''')
+
+                # Verifica e adiciona as novas colunas se elas não existirem
+                colunas_para_adicionar = {
+                    "tipo_cobranca": "TEXT",
+                    "numero_parcelas": "INTEGER",
+                    "valor_primeira_parcela": "REAL"
+                }
+                for coluna, tipo in colunas_para_adicionar.items():
+                    c.execute("SELECT 1 FROM information_schema.columns WHERE table_name='apolices' AND column_name=%s", (coluna,))
+                    if not c.fetchone():
+                        c.execute(f"ALTER TABLE apolices ADD COLUMN {coluna} {tipo}")
+
+                # --- CORREÇÃO DEFINITIVA: Garante que as Foreign Keys usem ON DELETE CASCADE ---
+                # Remove a restrição antiga (se existir) e adiciona a nova e correta.
+                c.execute("ALTER TABLE historico DROP CONSTRAINT IF EXISTS historico_apolice_id_fkey;")
+                c.execute("ALTER TABLE historico ADD CONSTRAINT historico_apolice_id_fkey FOREIGN KEY (apolice_id) REFERENCES apolices(id) ON DELETE CASCADE;")
+                
+                c.execute("ALTER TABLE boletos DROP CONSTRAINT IF EXISTS boletos_apolice_id_fkey;")
+                c.execute("ALTER TABLE boletos ADD CONSTRAINT boletos_apolice_id_fkey FOREIGN KEY (apolice_id) REFERENCES apolices(id) ON DELETE CASCADE;")
+                # --- FIM DA CORREÇÃO ---
                 
                 c.execute("SELECT id FROM usuarios WHERE email = %s", ('adm@moreiraseg.com.br',))
                 if not c.fetchone():
@@ -263,7 +265,8 @@ def delete_apolice(apolice_id):
                 # automaticamente os registos em 'historico' e 'boletos'.
                 c.execute("DELETE FROM apolices WHERE id = %s", (apolice_id,))
             conn.commit()
-            add_historico(apolice_id, st.session_state.get('user_email', 'sistema'), 'Exclusão', f"Apólice ID {apolice_id} apagada.")
+            # Não é ideal registar histórico para algo que já foi apagado, mas mantemos para consistência
+            # add_historico(apolice_id, st.session_state.get('user_email', 'sistema'), 'Exclusão', f"Apólice ID {apolice_id} apagada.")
             return True
     except Exception as e:
         st.error(f"❌ Erro ao apagar a apólice: {e}")
