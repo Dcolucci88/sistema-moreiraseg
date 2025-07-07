@@ -1,5 +1,5 @@
 # moreiraseg_sistema.py
-# VERSÃO COMPLETA E CORRIGIDA COM LEITURA DE DADOS VIA API
+# VERSÃO COMPLETA E FINAL COM LEITURA DE DADOS VIA API
 
 import streamlit as st
 import pandas as pd
@@ -292,11 +292,11 @@ def get_apolices(search_term=None):
         term = search_term.lower()
         # Garante que as colunas existem antes de tentar filtrar
         df_filtered = df[
-            (df['numero_apolice'].astype(str).str.lower().str.contains(term)) |
-            (df['cliente'].astype(str).str.lower().str.contains(term))
+            (df['numero_apolice'].astype(str).str.lower().str.contains(term, na=False)) |
+            (df['cliente'].astype(str).str.lower().str.contains(term, na=False))
         ]
         if 'placa' in df.columns:
-            df_filtered = df_filtered | (df['placa'].astype(str).str.lower().str.contains(term))
+            df_filtered = df_filtered | (df['placa'].astype(str).str.lower().str.contains(term, na=False))
         df = df_filtered
 
     df['data_final_de_vigencia'] = pd.to_datetime(df['data_final_de_vigencia'], errors='coerce')
