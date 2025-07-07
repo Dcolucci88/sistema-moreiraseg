@@ -1,5 +1,5 @@
 # moreiraseg_sistema.py
-# VERSÃO COMPLETA COM LEITURA DE DADOS VIA API
+# VERSÃO COMPLETA E CORRIGIDA COM LEITURA DE DADOS VIA API
 
 import streamlit as st
 import pandas as pd
@@ -290,12 +290,11 @@ def get_apolices(search_term=None):
     # Filtra os dados localmente se um termo de pesquisa for fornecido
     if search_term:
         term = search_term.lower()
-        # Garante que as colunas existem antes de tentar filtrar
-        df_filtered = df[
+        df = df[
             (df['numero_apolice'].astype(str).str.lower().str.contains(term)) |
-            (df['cliente'].astype(str).str.lower().str.contains(term))
+            (df['cliente'].astype(str).str.lower().str.contains(term)) |
+            (df['placa'].astype(str).str.lower().str.contains(term))
         ]
-        df = df_filtered
 
     df['data_final_de_vigencia'] = pd.to_datetime(df['data_final_de_vigencia'], errors='coerce')
     today_date = date.today()
@@ -337,7 +336,7 @@ def login_user(email, senha):
         st.error(f"Erro durante o login: {e}")
         return None
 
-# --- RENDERIZAÇÃO DA INTERFACE ---
+# --- RENDERIZAÇÃO DA INTERFACE (COMPLETA) ---
 
 def render_dashboard():
     st.title("📊 Painel de Controle")
