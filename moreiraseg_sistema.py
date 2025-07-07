@@ -1,5 +1,5 @@
 # moreiraseg_sistema.py
-# VERSÃO COMPLETA COM LEITURA DE DADOS VIA API
+# VERSÃO FINAL, COMPLETA E CORRIGIDA
 
 import streamlit as st
 import pandas as pd
@@ -8,7 +8,6 @@ from datetime import date
 import os
 import re
 import json
-import requests # Nova biblioteca para fazer pedidos à API
 
 # Tente importar as bibliotecas necessárias, mostrando erros amigáveis.
 try:
@@ -30,10 +29,8 @@ except ImportError:
 ASSETS_DIR = "LogoTipo" 
 LOGO_PATH = os.path.join(ASSETS_DIR, "logo_azul.png")
 ICONE_PATH = os.path.join(ASSETS_DIR, "Icone.png")
-# URL da nossa API (será lido dos secrets)
-API_BASE_URL = st.secrets.get("api_base_url")
 
-# --- FUNÇÕES DE BANCO DE DADOS (Mantidas para operações de escrita) ---
+# --- FUNÇÕES DE BANCO DE DADOS (ATUALIZADAS PARA POSTGRESQL) ---
 
 def get_connection():
     """Retorna uma conexão com o banco de dados PostgreSQL na nuvem."""
@@ -57,6 +54,7 @@ def init_db():
     try:
         with get_connection() as conn:
             with conn.cursor() as c:
+                # Criação da tabela principal com status 'Ativa' como padrão
                 c.execute('''
                     CREATE TABLE IF NOT EXISTS apolices (
                         id SERIAL PRIMARY KEY,
@@ -70,6 +68,8 @@ def init_db():
                         data_atualizacao TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
                     )
                 ''')
+
+                # Verifica e adiciona as novas colunas se elas não existirem
                 colunas_para_adicionar = {
                     "tipo_cobranca": "TEXT",
                     "numero_parcelas": "INTEGER",
@@ -83,6 +83,8 @@ def init_db():
                     """, (coluna,))
                     if not c.fetchone():
                         c.execute(f"ALTER TABLE apolices ADD COLUMN {coluna} {tipo}")
+                        st.toast(f"Coluna '{coluna}' adicionada ao banco de dados.", icon="✅")
+                
                 c.execute('''
                     CREATE TABLE IF NOT EXISTS boletos (
                         id SERIAL PRIMARY KEY,
@@ -93,6 +95,7 @@ def init_db():
                         FOREIGN KEY (apolice_id) REFERENCES apolices(id) ON DELETE CASCADE
                     )
                 ''')
+
                 c.execute('''
                     CREATE TABLE IF NOT EXISTS historico (
                         id SERIAL PRIMARY KEY,
@@ -114,6 +117,7 @@ def init_db():
                         data_cadastro TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
                     )
                 ''')
+                
                 c.execute("SELECT id FROM usuarios WHERE email = %s", ('adm@moreiraseg.com.br',))
                 if not c.fetchone():
                     c.execute(
@@ -250,68 +254,35 @@ def update_apolice(apolice_id, update_data):
         st.error(f"❌ Erro ao atualizar a apólice: {e}")
         return False
 
-def get_apolices_from_api(search_term=None):
-    """
-    Busca apólices através da API FastAPI em vez de conectar diretamente ao banco de dados.
-    """
-    if not API_BASE_URL:
-        st.error("A URL da API não está configurada nos 'Secrets'.")
-        return pd.DataFrame()
-
-    endpoint = f"{API_BASE_URL}/apolices/"
-    params = {}
-    # No futuro, a API pode ser melhorada para aceitar um termo de pesquisa
-    # if search_term:
-    #     params['q'] = search_term
-
-    try:
-        response = requests.get(endpoint, params=params, timeout=15)
-        response.raise_for_status()
-        data = response.json()
-        
-        # Se a API retornar uma lista vazia, cria um DataFrame vazio com as colunas esperadas
-        if not data:
-            return pd.DataFrame(columns=['id', 'numero_apolice', 'cliente', 'seguradora', 'status', 'data_final_de_vigencia'])
-
-        return pd.DataFrame(data)
-    except requests.exceptions.RequestException as e:
-        st.error(f"Erro ao comunicar com a API: {e}")
-        return pd.DataFrame()
-    except json.JSONDecodeError:
-        st.error("A resposta da API não é um JSON válido. Verifique a API.")
-        return pd.DataFrame()
-
 def get_apolices(search_term=None):
-    """
-    Função principal para obter apólices. Agora usa a API.
-    A lógica de cálculo de dias restantes é feita após receber os dados.
-    """
-    df = get_apolices_from_api(search_term=search_term)
-
-    if df.empty:
+    try:
+        with get_connection() as conn:
+            query = "SELECT * FROM apolices"
+            params = []
+            if search_term:
+                query += " WHERE numero_apolice ILIKE %s OR cliente ILIKE %s OR placa ILIKE %s"
+                like_term = f"%{search_term}%"
+                params = [like_term, like_term, like_term]
+            query += " ORDER BY data_final_de_vigencia ASC"
+            df = pd.read_sql_query(query, conn, params=params)
+    except Exception as e:
+        st.error(f"Erro ao carregar apólices: {e}")
         return pd.DataFrame()
 
-    # Filtra os dados localmente se a API não suportar a pesquisa
-    if search_term:
-        term = search_term.lower()
-        df = df[
-            df['numero_apolice'].str.lower().contains(term) |
-            df['cliente'].str.lower().contains(term)
-        ]
-
-    df['data_final_de_vigencia'] = pd.to_datetime(df['data_final_de_vigencia'], errors='coerce')
-    today_date = date.today()
-    df['dias_restantes'] = df['data_final_de_vigencia'].apply(
-        lambda x: (x.date() - today_date).days if pd.notnull(x) else None
-    )
-    def define_prioridade(dias):
-        if pd.isna(dias): return '⚪ Indefinida'
-        if dias <= 3: return '🔥 Urgente'
-        elif dias <= 7: return '⚠️ Alta'
-        elif dias <= 20: return '⚠️ Média'
-        else: return '✅ Baixa'
-    df['prioridade'] = df['dias_restantes'].apply(define_prioridade)
-    
+    if not df.empty:
+        df['data_final_de_vigencia_dt'] = pd.to_datetime(df['data_final_de_vigencia'], errors='coerce')
+        today_date = date.today()
+        df['dias_restantes'] = df['data_final_de_vigencia_dt'].apply(
+            lambda x: (x.date() - today_date).days if pd.notnull(x) else None
+        )
+        def define_prioridade(dias):
+            if pd.isna(dias): return '⚪ Indefinida'
+            if dias <= 3: return '🔥 Urgente'
+            elif dias <= 7: return '⚠️ Alta'
+            elif dias <= 20: return '⚠️ Média'
+            else: return '✅ Baixa'
+        df['prioridade'] = df['dias_restantes'].apply(define_prioridade)
+        df.drop(columns=['data_final_de_vigencia_dt'], inplace=True)
     return df
     
 def get_apolice_details(apolice_id):
@@ -382,15 +353,187 @@ def render_pesquisa_e_edicao():
             st.success(f"{len(resultados)} apólice(s) encontrada(s).")
             for index, apolice_row in resultados.iterrows():
                 with st.expander(f"**{apolice_row['numero_apolice']}** - {apolice_row['cliente']}"):
-                    # ... (código completo para edição e upload)
+                    apolice_id = apolice_row['id']
+                    st.subheader("📝 Editar Informações da Apólice")
+                    with st.form(f"edit_form_{apolice_id}"):
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            novo_valor_parcelas = st.text_input("Valor das Demais Parcelas (R$)", value=f"{apolice_row.get('valor_da_parcela', 0.0):.2f}", key=f"valor_{apolice_id}")
+                            novo_contato = st.text_input("Contato do Cliente", value=apolice_row.get('contato', ''), key=f"contato_{apolice_id}")
+                            data_inicio_atual = apolice_row.get('data_inicio_de_vigencia', date.today())
+                            nova_data_inicio = st.date_input("📅 Início de Vigência", value=data_inicio_atual, format="DD/MM/YYYY", key=f"data_inicio_{apolice_id}")
+                        with col2:
+                            novo_num_parcelas = st.number_input("Nº de Parcelas", min_value=1, max_value=12, value=int(apolice_row.get('numero_parcelas', 1)), key=f"parcelas_{apolice_id}")
+                            novo_email = st.text_input("E-mail do Cliente", value=apolice_row.get('email', ''), key=f"email_{apolice_id}")
+                            data_fim_atual = apolice_row.get('data_final_de_vigencia', date.today())
+                            nova_data_fim = st.date_input("📅 Fim de Vigência", value=data_fim_atual, format="DD/MM/YYYY", key=f"data_fim_{apolice_id}")
+                        edit_submitted = st.form_submit_button("Salvar Alterações")
+                        if edit_submitted:
+                            update_data = {
+                                'valor_da_parcela': float(novo_valor_parcelas.replace(',', '.')),
+                                'numero_parcelas': novo_num_parcelas,
+                                'contato': novo_contato,
+                                'email': novo_email,
+                                'data_inicio_de_vigencia': nova_data_inicio,
+                                'data_final_de_vigencia': nova_data_fim
+                            }
+                            if update_apolice(apolice_id, update_data):
+                                st.success("Informações da apólice atualizadas com sucesso!")
+                                st.rerun()
+                    st.divider()
+                    st.subheader("📁 Gerenciar Anexos")
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        with st.form(f"apolice_upload_form_{apolice_id}"):
+                            st.write("**Atualizar Apólice (PDF)**")
+                            apolice_pdf_file = st.file_uploader("Selecione a nova versão da apólice", type=["pdf"], key=f"apolice_pdf_{apolice_id}")
+                            apolice_upload_submitted = st.form_submit_button("Substituir PDF da Apólice")
+                            if apolice_upload_submitted and apolice_pdf_file:
+                                st.info("Fazendo upload da nova apólice...")
+                                novo_caminho = salvar_ficheiros_gcs([apolice_pdf_file], apolice_row['numero_apolice'], apolice_row['cliente'], 'apolices')
+                                if novo_caminho:
+                                    if update_apolice(apolice_id, {'caminho_pdf': novo_caminho[0]}):
+                                        st.success("PDF da apólice substituído com sucesso!")
+                                        st.rerun()
+                    with col2:
+                        with st.form(f"boleto_upload_form_{apolice_id}"):
+                            st.write("**Anexar Novo Boleto**")
+                            boleto_pdf_file = st.file_uploader("Selecione o novo boleto", type=["pdf"], key=f"boleto_pdf_{apolice_id}")
+                            boleto_upload_submitted = st.form_submit_button("Anexar Boleto")
+                            if boleto_upload_submitted and boleto_pdf_file:
+                                st.info("Fazendo upload do boleto...")
+                                novo_caminho_boleto = salvar_ficheiros_gcs([boleto_pdf_file], apolice_row['numero_apolice'], apolice_row['cliente'], 'boletos')
+                                if novo_caminho_boleto:
+                                    add_boletos_db(apolice_id, [(novo_caminho_boleto[0], boleto_pdf_file.name)])
+                                    st.success("Novo boleto anexado com sucesso!")
+                                    st.rerun()
 
 def render_cadastro_form():
-    st.title("➕ Cadastrar Apólice")
-    # ... (código completo do formulário)
+    st.title("➕ Cadastrar Nova Apólice")
+    with st.form("form_cadastro", clear_on_submit=True):
+        st.subheader("Dados da Apólice")
+        col1, col2 = st.columns(2)
+        with col1:
+            seguradora = st.text_input("Seguradora*", max_chars=50)
+            numero_apolice = st.text_input("Número da Apólice*", max_chars=50)
+            tipo_seguro = st.selectbox("Tipo de Seguro*", ["Automóvel", "RCO", "Vida", "Residencial", "Empresarial", "Saúde", "Viagem", "Fiança", "Outro"])
+            data_inicio = st.date_input("📅 Início de Vigência*", format="DD/MM/YYYY")
+        with col2:
+            cliente = st.text_input("Cliente*", max_chars=100)
+            placa = st.text_input("🚗 Placa do Veículo (Obrigatório para Auto/RCO)", max_chars=10)
+            tipo_cobranca = st.selectbox("Tipo de Cobrança*", ["Boleto", "Faturamento", "Cartão de Crédito", "Débito em Conta"])
+            data_fim = st.date_input("📅 Fim de Vigência*", min_value=data_inicio + datetime.timedelta(days=1) if data_inicio else date.today(), format="DD/MM/YYYY")
+        st.subheader("Valores e Comissão")
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            valor_primeira_parcela = st.text_input("💰 Valor da 1ª Parcela (R$)", value="0,00")
+        with col2:
+            valor_demais_parcelas = st.text_input("💰 Valor das Demais Parcelas (R$)*", value="0,00")
+        with col3:
+            numero_parcelas = st.selectbox("Nº de Parcelas", options=list(range(1, 13)), index=0)
+        with col4:
+            comissao = st.number_input("💼 Comissão (%)", min_value=0.0, max_value=100.0, value=10.0, step=0.5, format="%.2f")
+        st.subheader("Dados de Contato e Outros")
+        contato = st.text_input("📱 Contato do Cliente*", max_chars=100)
+        email = st.text_input("📧 E-mail do Cliente", max_chars=100)
+        observacoes = st.text_area("📝 Observações", height=100)
+        st.subheader("Anexos")
+        pdf_file = st.file_uploader("📎 Anexar PDF da Apólice (Opcional)", type=["pdf"])
+        boletos_files = st.file_uploader("📎 Anexar Boletos (Opcional)", type=["pdf"], accept_multiple_files=True)
+        submitted = st.form_submit_button("💾 Salvar Apólice", use_container_width=True)
+        if submitted:
+            campos_obrigatorios = {
+                "Seguradora": seguradora, "Cliente": cliente, "Número da Apólice": numero_apolice,
+                "Valor das Demais Parcelas": valor_demais_parcelas, "Contato": contato
+            }
+            campos_vazios = [nome for nome, valor in campos_obrigatorios.items() if not valor]
+            if tipo_seguro in ["Automóvel", "RCO"] and not placa:
+                campos_vazios.append("Placa (obrigatória para Auto/RCO)")
+            if campos_vazios:
+                st.error(f"Por favor, preencha os seguintes campos obrigatórios: {', '.join(campos_vazios)}")
+                return
+            caminho_pdf_apolice = None
+            if pdf_file:
+                st.info("Fazendo upload do PDF da apólice...")
+                urls = salvar_ficheiros_gcs([pdf_file], numero_apolice, cliente, 'apolices')
+                if urls:
+                    caminho_pdf_apolice = urls[0]
+                else:
+                    st.error("Falha no upload do PDF da apólice.")
+                    return
+            apolice_data = {
+                'seguradora': seguradora, 'cliente': cliente, 'numero_apolice': numero_apolice,
+                'placa': placa, 'tipo_seguro': tipo_seguro, 'tipo_cobranca': tipo_cobranca,
+                'numero_parcelas': numero_parcelas, 'valor_primeira_parcela': valor_primeira_parcela, 
+                'valor_da_parcela': valor_demais_parcelas, 'comissao': comissao, 
+                'data_inicio_de_vigencia': data_inicio, 'data_final_de_vigencia': data_fim, 
+                'contato': contato, 'email': email, 'observacoes': observacoes, 
+                'status': 'Ativa', 'caminho_pdf': caminho_pdf_apolice if caminho_pdf_apolice else ""
+            }
+            apolice_id = add_apolice(apolice_data)
+            if apolice_id:
+                st.success(f"🎉 Apólice '{numero_apolice}' cadastrada com sucesso!")
+                if caminho_pdf_apolice:
+                    st.success("PDF da apólice salvo na nuvem!")
+                if boletos_files:
+                    st.info("Fazendo upload dos boletos...")
+                    urls_boletos = salvar_ficheiros_gcs(boletos_files, numero_apolice, cliente, 'boletos')
+                    if urls_boletos:
+                        boletos_info = list(zip(urls_boletos, [f.name for f in boletos_files]))
+                        add_boletos_db(apolice_id, boletos_info)
+                        st.success(f"{len(urls_boletos)} boleto(s) salvo(s) na nuvem com sucesso!")
+                    else:
+                        st.warning("A apólice foi salva, mas ocorreu uma falha no upload dos boletos.")
+                st.balloons()
+            else:
+                st.error("Falha ao salvar a apólice no banco de dados.")
 
 def render_configuracoes():
     st.title("⚙️ Configurações do Sistema")
-    # ... (código completo das configurações)
+    tab1, tab2 = st.tabs(["Gerenciar Usuários", "Backup e Restauração"])
+    with tab1:
+        st.subheader("Usuários Cadastrados")
+        try:
+            with get_connection() as conn:
+                usuarios_df = pd.read_sql_query("SELECT id, nome, email, perfil, data_cadastro FROM usuarios", conn)
+            st.dataframe(usuarios_df, use_container_width=True)
+        except Exception as e:
+            st.error(f"Erro ao listar usuários: {e}")
+        with st.expander("Adicionar Novo Usuário"):
+            with st.form("form_novo_usuario", clear_on_submit=True):
+                nome = st.text_input("Nome Completo")
+                email = st.text_input("E-mail")
+                senha = st.text_input("Senha", type="password")
+                perfil = st.selectbox("Perfil", ["user", "admin"])
+                if st.form_submit_button("Adicionar Usuário"):
+                    if not all([nome, email, senha, perfil]):
+                        st.warning("Todos os campos são obrigatórios.")
+                    else:
+                        try:
+                            with get_connection() as conn:
+                                with conn.cursor() as c:
+                                    c.execute(
+                                        "INSERT INTO usuarios (nome, email, senha, perfil) VALUES (%s, %s, %s, %s)",
+                                        (nome, email, senha, perfil)
+                                    )
+                                conn.commit()
+                            st.success(f"Usuário '{nome}' adicionado com sucesso!")
+                            st.rerun()
+                        except psycopg2.errors.UniqueViolation:
+                            st.error(f"Erro: O e-mail '{email}' já está cadastrado.")
+                        except Exception as e:
+                            st.error(f"Erro ao adicionar usuário: {e}")
+    with tab2:
+        st.subheader("Backup de Dados (Exportar)")
+        with get_connection() as conn:
+            all_data_df = pd.read_sql_query("SELECT * FROM apolices", conn)
+        csv_data = all_data_df.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="📥 Exportar Backup Completo (CSV)",
+            data=csv_data,
+            file_name=f"backup_completo_apolices_{date.today()}.csv",
+            mime="text/csv"
+        )
 
 def main():
     """Função principal que renderiza a aplicação Streamlit."""
@@ -479,5 +622,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
