@@ -1,5 +1,5 @@
 # moreiraseg_sistema.py
-# VERSÃO ESTÁVEL COM CONEXÃO DIRETA AO POSTGRESQL
+# VERSÃO COM CÁLCULO DE DATAS CORRIGIDO
 
 import streamlit as st
 import pandas as pd
@@ -285,11 +285,15 @@ def get_apolices(search_term=None):
         return pd.DataFrame()
 
     if not df.empty:
-        df['data_final_de_vigencia_dt'] = pd.to_datetime(df['data_final_de_vigencia'], errors='coerce')
-        today_date = date.today()
-        df['dias_restantes'] = df['data_final_de_vigencia_dt'].apply(
-            lambda x: (x.date() - today_date).days if pd.notnull(x) else None
-        )
+        # --- CORREÇÃO DEFINITIVA PARA O CÁLCULO DE DATAS ---
+        # 1. Converte a coluna para datetime, tratando possíveis erros.
+        df['data_final_de_vigencia'] = pd.to_datetime(df['data_final_de_vigencia'], errors='coerce')
+        
+        # 2. Calcula a diferença em dias de forma robusta.
+        today = pd.to_datetime(date.today())
+        df['dias_restantes'] = (df['data_final_de_vigencia'] - today).dt.days
+        # --- FIM DA CORREÇÃO ---
+        
         def define_prioridade(dias):
             if pd.isna(dias): return '⚪ Indefinida'
             if dias <= 3: return '🔥 Urgente'
@@ -297,7 +301,6 @@ def get_apolices(search_term=None):
             elif dias <= 20: return '⚠️ Média'
             else: return '✅ Baixa'
         df['prioridade'] = df['dias_restantes'].apply(define_prioridade)
-        df.drop(columns=['data_final_de_vigencia_dt'], inplace=True)
     return df
     
 def get_apolice_details(apolice_id):
