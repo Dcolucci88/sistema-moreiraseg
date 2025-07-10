@@ -1,5 +1,5 @@
 # moreiraseg_sistema.py
-# VERSÃO ESTÁVEL COM CÁLCULO DE DATAS AUTOMÁTICO
+# VERSÃO COM NOVAS REGRAS DE PRIORIDADE E STATUS
 
 import streamlit as st
 import pandas as pd
@@ -285,19 +285,21 @@ def get_apolices(search_term=None):
         return pd.DataFrame()
 
     if not df.empty:
+        # --- CORREÇÃO DEFINITIVA PARA O CÁLCULO DE DATAS ---
         df['data_final_de_vigencia'] = pd.to_datetime(df['data_final_de_vigencia'], errors='coerce')
         today = pd.to_datetime(date.today())
         df['dias_restantes'] = (df['data_final_de_vigencia'] - today).dt.days
         
+        # --- NOVAS REGRAS DE PRIORIDADE ---
         def define_prioridade(dias):
             if pd.isna(dias): return '⚪ Indefinida'
             if dias <= 15: return '🔥 Urgente'
             elif dias <= 30: return '⚠️ Alta'
             elif dias <= 60: return '⚠️ Média'
-            else: return '✅ Baixa'
+            else: return '✅ Baixa' # Acima de 60 dias
         df['prioridade'] = df['dias_restantes'].apply(define_prioridade)
         
-        # Lógica de Status para exibição
+        # --- LÓGICA DE STATUS PARA EXIBIÇÃO ---
         df.loc[df['dias_restantes'] <= 30, 'status'] = 'Pendente'
     return df
     
