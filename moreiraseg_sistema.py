@@ -1,13 +1,14 @@
 # moreiraseg_sistema.py
-# VERSÃO COM CÁLCULO DE DATAS CORRIGIDO E AUTOMATIZADO
+# VERSÃO COMPLETA E CORRIGIDA COM LEITURA DE DADOS VIA API
 
 import streamlit as st
 import pandas as pd
 import datetime
-from datetime import date, timedelta
+from datetime import date
 import os
 import re
 import json
+import requests # Nova biblioteca para fazer pedidos à API
 
 # Tente importar as bibliotecas necessárias, mostrando erros amigáveis.
 try:
@@ -29,8 +30,10 @@ except ImportError:
 ASSETS_DIR = "LogoTipo" 
 LOGO_PATH = os.path.join(ASSETS_DIR, "logo_azul.png")
 ICONE_PATH = os.path.join(ASSETS_DIR, "Icone.png")
+# URL da nossa API (será lido dos secrets)
+API_BASE_URL = st.secrets.get("api_base_url")
 
-# --- FUNÇÕES DE BANCO DE DADOS (ATUALIZADAS PARA POSTGRESQL) ---
+# --- FUNÇÕES DE BANCO DE DADOS (Mantidas para operações de escrita) ---
 
 def get_connection():
     """Retorna uma conexão com o banco de dados PostgreSQL na nuvem."""
@@ -54,7 +57,6 @@ def init_db():
     try:
         with get_connection() as conn:
             with conn.cursor() as c:
-                # Criação da tabela principal com status 'Ativa' como padrão
                 c.execute('''
                     CREATE TABLE IF NOT EXISTS apolices (
                         id SERIAL PRIMARY KEY,
@@ -68,8 +70,6 @@ def init_db():
                         data_atualizacao TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
                     )
                 ''')
-
-                # Verifica e adiciona as novas colunas se elas não existirem
                 colunas_para_adicionar = {
                     "tipo_cobranca": "TEXT",
                     "numero_parcelas": "INTEGER",
@@ -83,7 +83,6 @@ def init_db():
                     """, (coluna,))
                     if not c.fetchone():
                         c.execute(f"ALTER TABLE apolices ADD COLUMN {coluna} {tipo}")
-                
                 c.execute('''
                     CREATE TABLE IF NOT EXISTS boletos (
                         id SERIAL PRIMARY KEY,
@@ -94,7 +93,6 @@ def init_db():
                         FOREIGN KEY (apolice_id) REFERENCES apolices(id) ON DELETE CASCADE
                     )
                 ''')
-
                 c.execute('''
                     CREATE TABLE IF NOT EXISTS historico (
                         id SERIAL PRIMARY KEY,
@@ -116,7 +114,6 @@ def init_db():
                         data_cadastro TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
                     )
                 ''')
-                
                 c.execute("SELECT id FROM usuarios WHERE email = %s", ('adm@moreiraseg.com.br',))
                 if not c.fetchone():
                     c.execute(
@@ -265,45 +262,73 @@ def delete_apolice(apolice_id):
         st.error(f"❌ Erro ao apagar a apólice: {e}")
         return False
 
-@st.cache_data(ttl=60)
-def get_apolices(search_term=None):
+# --- NOVA FUNÇÃO PARA BUSCAR DADOS DA API ---
+@st.cache_data(ttl=60) # Adiciona cache para não pedir os dados à API a cada interação
+def get_apolices_from_api():
     """
-    Busca apólices DIRETAMENTE do banco de dados PostgreSQL.
+    Busca apólices através da API FastAPI.
     """
-    try:
-        with get_connection() as conn:
-            query = "SELECT * FROM apolices"
-            params = []
-            if search_term:
-                query += " WHERE numero_apolice ILIKE %s OR cliente ILIKE %s OR placa ILIKE %s"
-                like_term = f"%{search_term}%"
-                params = [like_term, like_term, like_term]
-            query += " ORDER BY data_final_de_vigencia ASC"
-            df = pd.read_sql_query(query, conn, params=params)
-    except Exception as e:
-        st.error(f"Erro ao carregar apólices: {e}")
+    if not API_BASE_URL:
+        st.error("A URL da API não está configurada nos 'Secrets'.")
         return pd.DataFrame()
 
-    if not df.empty:
-        # --- CORREÇÃO DEFINITIVA PARA O CÁLCULO DE DATAS ---
-        # 1. Converte a coluna para datetime, tratando possíveis erros.
-        df['data_final_de_vigencia'] = pd.to_datetime(df['data_final_de_vigencia'], errors='coerce')
+    endpoint = f"{API_BASE_URL}/apolices/"
+    try:
+        response = requests.get(endpoint, timeout=15)
+        response.raise_for_status()
+        data = response.json()
         
-        # 2. Calcula a diferença em dias de forma robusta.
-        today = pd.to_datetime(date.today())
-        df['dias_restantes'] = (df['data_final_de_vigencia'] - today).dt.days
-        # --- FIM DA CORREÇÃO ---
-        
-        def define_prioridade(dias):
-            if pd.isna(dias): return '⚪ Indefinida'
-            if dias <= 3: return '🔥 Urgente'
-            elif dias <= 7: return '⚠️ Alta'
-            elif dias <= 20: return '⚠️ Média'
-            else: return '✅ Baixa'
-        df['prioridade'] = df['dias_restantes'].apply(define_prioridade)
+        if not data:
+            return pd.DataFrame()
+
+        return pd.DataFrame(data)
+    except requests.exceptions.RequestException as e:
+        st.error(f"Erro ao comunicar com a API: {e}")
+        return pd.DataFrame()
+    except json.JSONDecodeError:
+        st.error("A resposta da API não é um JSON válido. Verifique a API.")
+        return pd.DataFrame()
+
+def get_apolices(search_term=None):
+    """
+    Função principal para obter apólices. Agora usa a API.
+    A lógica de cálculo de dias restantes é feita após receber os dados.
+    """
+    df = get_apolices_from_api() # Busca todos os dados da API
+
+    if df.empty:
+        return pd.DataFrame()
+
+    # Filtra os dados localmente se um termo de pesquisa for fornecido
+    if search_term:
+        term = search_term.lower()
+        # Garante que as colunas existem antes de tentar filtrar
+        df_filtered = df[
+            (df['numero_apolice'].astype(str).str.lower().str.contains(term, na=False)) |
+            (df['cliente'].astype(str).str.lower().str.contains(term, na=False))
+        ]
+        if 'placa' in df.columns:
+            df_filtered = df_filtered | (df['placa'].astype(str).str.lower().str.contains(term, na=False))
+        df = df_filtered
+
+    df['data_final_de_vigencia'] = pd.to_datetime(df['data_final_de_vigencia'], errors='coerce')
+    today_date = date.today()
+    df['dias_restantes'] = df['data_final_de_vigencia'].apply(
+        lambda x: (x.date() - today_date).days if pd.notnull(x) else None
+    )
+    def define_prioridade(dias):
+        if pd.isna(dias): return '⚪ Indefinida'
+        if dias <= 3: return '🔥 Urgente'
+        elif dias <= 7: return '⚠️ Alta'
+        elif dias <= 20: return '⚠️ Média'
+        else: return '✅ Baixa'
+    df['prioridade'] = df['dias_restantes'].apply(define_prioridade)
+    
     return df
     
 def get_apolice_details(apolice_id):
+    # Esta função ainda conecta diretamente ao DB para obter todos os detalhes.
+    # No futuro, poderíamos criar um endpoint na API para isto.
     try:
         with get_connection() as conn:
             with conn.cursor(cursor_factory=DictCursor) as c:
@@ -326,7 +351,7 @@ def login_user(email, senha):
         st.error(f"Erro durante o login: {e}")
         return None
 
-# --- RENDERIZAÇÃO DA INTERFACE ---
+# --- RENDERIZAÇÃO DA INTERFACE (COMPLETA) ---
 
 def render_dashboard():
     st.title("📊 Painel de Controle")
@@ -449,10 +474,7 @@ def render_cadastro_form():
             cliente = st.text_input("Cliente*", max_chars=100)
             placa = st.text_input("🚗 Placa do Veículo (Obrigatório para Auto/RCO)", max_chars=10)
             tipo_cobranca = st.selectbox("Tipo de Cobrança*", ["Boleto", "Faturamento", "Cartão de Crédito", "Débito em Conta"])
-            # --- ALTERAÇÃO: Fim de Vigência agora é calculado e exibido ---
-            data_fim_calculada = data_inicio + timedelta(days=365)
-            st.date_input("📅 Fim de Vigência (Automático)", value=data_fim_calculada, format="DD/MM/YYYY", disabled=True)
-        
+            data_fim = st.date_input("📅 Fim de Vigência*", min_value=data_inicio + datetime.timedelta(days=1) if data_inicio else date.today(), format="DD/MM/YYYY")
         st.subheader("Valores e Comissão")
         col1, col2, col3, col4 = st.columns(4)
         with col1:
@@ -491,10 +513,6 @@ def render_cadastro_form():
                 else:
                     st.error("Falha no upload do PDF da apólice.")
                     return
-            
-            # --- ALTERAÇÃO: Usa a data de fim calculada ---
-            data_fim = data_inicio + timedelta(days=365)
-            
             apolice_data = {
                 'seguradora': seguradora, 'cliente': cliente, 'numero_apolice': numero_apolice,
                 'placa': placa, 'tipo_seguro': tipo_seguro, 'tipo_cobranca': tipo_cobranca,
@@ -656,3 +674,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
