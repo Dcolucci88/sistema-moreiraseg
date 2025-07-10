@@ -1,10 +1,10 @@
 # moreiraseg_sistema.py
-# VERSÃO COM CÁLCULO DE DATAS CORRIGIDO
+# VERSÃO COM CÁLCULO DE DATAS CORRIGIDO E AUTOMATIZADO
 
 import streamlit as st
 import pandas as pd
 import datetime
-from datetime import date
+from datetime import date, timedelta
 import os
 import re
 import json
@@ -449,7 +449,10 @@ def render_cadastro_form():
             cliente = st.text_input("Cliente*", max_chars=100)
             placa = st.text_input("🚗 Placa do Veículo (Obrigatório para Auto/RCO)", max_chars=10)
             tipo_cobranca = st.selectbox("Tipo de Cobrança*", ["Boleto", "Faturamento", "Cartão de Crédito", "Débito em Conta"])
-            data_fim = st.date_input("📅 Fim de Vigência*", min_value=data_inicio + datetime.timedelta(days=1) if data_inicio else date.today(), format="DD/MM/YYYY")
+            # --- ALTERAÇÃO: Fim de Vigência agora é calculado e exibido ---
+            data_fim_calculada = data_inicio + timedelta(days=365)
+            st.date_input("📅 Fim de Vigência (Automático)", value=data_fim_calculada, format="DD/MM/YYYY", disabled=True)
+        
         st.subheader("Valores e Comissão")
         col1, col2, col3, col4 = st.columns(4)
         with col1:
@@ -488,6 +491,10 @@ def render_cadastro_form():
                 else:
                     st.error("Falha no upload do PDF da apólice.")
                     return
+            
+            # --- ALTERAÇÃO: Usa a data de fim calculada ---
+            data_fim = data_inicio + timedelta(days=365)
+            
             apolice_data = {
                 'seguradora': seguradora, 'cliente': cliente, 'numero_apolice': numero_apolice,
                 'placa': placa, 'tipo_seguro': tipo_seguro, 'tipo_cobranca': tipo_cobranca,
@@ -649,4 +656,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
