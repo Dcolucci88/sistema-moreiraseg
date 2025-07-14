@@ -607,7 +607,6 @@ def main():
                             st.rerun()
                         else:
                             st.error("Credenciais inválidas. Tente novamente.")
-                st.info("Para testes, use: `adm@moreiraseg.com.br` / `Salmo@139`")
             return
 
         with st.sidebar:
