@@ -121,34 +121,32 @@ def init_db():
         st.stop()
 
 
-# --- FUNÇÕES DE UPLOAD (Sem alteração, pois já usava secrets corretamente) ---
+# --- FUNÇÕES DE UPLOAD (Com indentação corrigida) ---
 def salvar_ficheiros_gcs(ficheiros, numero_apolice, cliente, tipo_pasta):
-    if not isinstance(ficheiros, list):
-        ficheiros = [ficheiros]
-    urls_publicas = []
-    try:
-        creds_info = dict(st.secrets["gcs_credentials"])
-        credentials = service_account.Credentials.from_service_account_info(creds_info)
-        bucket_name = st.secrets["gcs_bucket_name"]
-        client = storage.Client(credentials=credentials)
-        bucket = client.get_bucket(bucket_name)
-        safe_cliente = re.sub(r'[^a-zA-Z0-9\s-]', '', cliente).strip().replace(' ', '_')
-        for ficheiro in ficheiros:
-            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            destination_blob_name = f"{tipo_pasta}/{safe_cliente}/{numero_apolice}/{timestamp}_{ficheiro.name}"
-            blob = bucket.blob(destination_blob_name)
-            blob.upload_from_file(ficheiro, content_type=ficheiro.type)
-            blob.make_public()
-            urls_publicas.append(blob.public_url)
-        return urls_publicas
-    except KeyError as e:
-        st.error(f"Erro de chave nos 'Secrets': A chave '{e}' não foi encontrada.")
-        return []
-    except Exception as e:
-        st.error(f"❌ Falha no upload para o Google Cloud Storage: {e}")
-        return []
-
-
+    if not isinstance(ficheiros, list):
+        ficheiros = [ficheiros]
+    urls_publicas = []
+    try:
+        creds_info = dict(st.secrets["gcs_credentials"])
+        credentials = service_account.Credentials.from_service_account_info(creds_info)
+        bucket_name = st.secrets["gcs_bucket_name"]
+        client = storage.Client(credentials=credentials)
+        bucket = client.get_bucket(bucket_name)
+        safe_cliente = re.sub(r'[^a-zA-Z0-9\s-]', '', cliente).strip().replace(' ', '_')
+        for ficheiro in ficheiros:
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            destination_blob_name = f"{tipo_pasta}/{safe_cliente}/{numero_apolice}/{timestamp}_{ficheiro.name}"
+            blob = bucket.blob(destination_blob_name)
+            blob.upload_from_file(ficheiro, content_type=ficheiro.type)
+            blob.make_public()
+            urls_publicas.append(blob.public_url)
+        return urls_publicas
+    except KeyError as e:
+        st.error(f"Erro de chave nos 'Secrets': A chave '{e}' não foi encontrada.")
+        return []
+    except Exception as e:
+        st.error(f"❌ Falha no upload para o Google Cloud Storage: {e}")
+        return []
 # --- FUNÇÕES DE LÓGICA DO SISTEMA (ATUALIZADAS) ---
 
 def add_historico(apolice_id, usuario_email, acao, detalhes=""):
