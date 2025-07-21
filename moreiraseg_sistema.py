@@ -333,83 +333,81 @@ def render_dashboard():
                 st.info(f"Nenhuma apólice com prioridade '{prioridade.split(' ')[-1]}'.")
 
 def render_pesquisa_e_edicao():
-    st.title("🔍 Pesquisar e Editar Apólice")
-    search_term = st.text_input("Pesquisar por Nº Apólice, Cliente ou Placa:", key="search_box")
-    if search_term:
-        resultados = get_apolices(search_term=search_term)
-        if resultados.empty:
-            st.info("Nenhuma apólice encontrada com o termo pesquisado.")
-        else:
-            st.success(f"{len(resultados)} apólice(s) encontrada(s).")
-            for index, apolice_row in resultados.iterrows():
-                with st.expander(f"**{apolice_row['numero_apolice']}** - {apolice_row['cliente']}"):
-                    apolice_id = apolice_row['id']
-                    st.subheader("📝 Editar Informações da Apólice")
-                    with st.form(f"edit_form_{apolice_id}"):
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            novo_valor_parcelas = st.text_input("Valor das Demais Parcelas (R$)", value=f"{apolice_row.get('valor_da_parcela', 0.0):.2f}", key=f"valor_{apolice_id}")
-                            novo_contato = st.text_input("Contato do Cliente", value=apolice_row.get('contato', ''), key=f"contato_{apolice_id}")
-                            # Convertendo para objeto date se não for NaT
-                            data_inicio_atual = apolice_row.get('data_inicio_de_vigencia')
-                            if pd.isna(data_inicio_atual): data_inicio_atual = date.today()
-                            nova_data_inicio = st.date_input("📅 Início de Vigência", value=data_inicio_atual, format="DD/MM/YYYY", key=f"data_inicio_{apolice_id}")
-                        with col2:
-                            novo_num_parcelas = st.number_input("Nº de Parcelas", min_value=1, max_value=12, value=int(apolice_row.get('numero_parcelas', 1)), key=f"parcelas_{apolice_id}")
-                            novo_email = st.text_input("E-mail do Cliente", value=apolice_row.get('email', ''), key=f"email_{apolice_id}")
-                            # Convertendo para objeto date se não for NaT
-                            data_fim_atual = apolice_row.get('data_final_de_vigencia')
-                            if pd.isna(data_fim_atual): data_fim_atual = date.today()
-                            nova_data_fim = st.date_input("📅 Fim de Vigência", value=data_fim_atual, format="DD/MM/YYYY", key=f"data_fim_{apolice_id}")
-                        edit_submitted = st.form_submit_button("Salvar Alterações")
-                        if edit_submitted:
-                            update_data = {
-                                'valor_da_parcela': float(novo_valor_parcelas.replace(',', '.')),
-                                'numero_parcelas': novo_num_parcelas,
-                                'contato': novo_contato,
-                                'email': novo_email,
-                                'data_inicio_de_vigencia': nova_data_inicio,
-                                'data_final_de_vigencia': nova_data_fim
-                            }
-                            if update_apolice(apolice_id, update_data):
-                                st.success("Informações da apólice atualizadas com sucesso!")
-                                st.rerun()
-                    st.divider()
-                    st.subheader("📁 Gerenciar Anexos")
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        with st.form(f"apolice_upload_form_{apolice_id}"):
-                            st.write("**Atualizar Apólice (PDF)**")
-                            apolice_pdf_file = st.file_uploader("Selecione a nova versão da apólice", type=["pdf"], key=f"apolice_pdf_{apolice_id}")
-                            apolice_upload_submitted = st.form_submit_button("Substituir PDF da Apólice")
-                            if apolice_upload_submitted and apolice_pdf_file:
-                                st.info("Fazendo upload da nova apólice...")
-                                novo_caminho = salvar_ficheiros_gcs([apolice_pdf_file], apolice_row['numero_apolice'], apolice_row['cliente'], 'apolices')
-                                if novo_caminho:
-                                    if update_apolice(apolice_id, {'caminho_pdf': novo_caminho[0]}):
-                                        st.success("PDF da apólice substituído com sucesso!")
-                                        st.rerun()
-                    with col2:
-                        with st.form(f"boleto_upload_form_{apolice_id}"):
-                            st.write("**Anexar Novo Boleto**")
-                            boleto_pdf_file = st.file_uploader("Selecione o novo boleto", type=["pdf"], key=f"boleto_pdf_{apolice_id}")
-                            boleto_upload_submitted = st.form_submit_button("Anexar Boleto")
-                            if boleto_upload_submitted and boleto_pdf_file:
-                                st.info("Fazendo upload do boleto...")
-                                novo_caminho_boleto = salvar_ficheiros_gcs([boleto_pdf_file], apolice_row['numero_apolice'], apolice_row['cliente'], 'boletos')
-                                if novo_caminho_boleto:
-                                    add_boletos_db(apolice_id, [(novo_caminho_boleto[0], boleto_pdf_file.name)])
-                                    st.success("Novo boleto anexado com sucesso!")
-                                    st.rerun()
-                    st.divider()
-                    st.subheader("Zona de Perigo")
-                    with st.form(f"delete_form_{apolice_id}"):
-                        st.warning("Atenção: Apagar uma apólice é uma ação permanente e não pode ser desfeita.")
-                        delete_submitted = st.form_submit_button("🗑️ Apagar Apólice Permanentemente")
-                        if delete_submitted:
-                            if delete_apolice(apolice_id):
-                                st.success("Apólice apagada com sucesso!")
-                                st.rerun()
+    st.title("🔍 Pesquisar e Editar Apólice")
+    search_term = st.text_input("Pesquisar por Nº Apólice, Cliente ou Placa:", key="search_box")
+    if search_term:
+        resultados = get_apolices(search_term=search_term)
+        if resultados.empty:
+            st.info("Nenhuma apólice encontrada com o termo pesquisado.")
+        else:
+            st.success(f"{len(resultados)} apólice(s) encontrada(s).")
+            for index, apolice_row in resultados.iterrows():
+                with st.expander(f"**{apolice_row['numero_apolice']}** - {apolice_row['cliente']}"):
+                    apolice_id = apolice_row['id']
+                    st.subheader("📝 Editar Informações da Apólice")
+                    with st.form(f"edit_form_{apolice_id}"):
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            novo_valor_parcelas = st.text_input("Valor das Demais Parcelas (R$)", value=f"{apolice_row.get('valor_da_parcela', 0.0):.2f}", key=f"valor_{apolice_id}")
+                            novo_contato = st.text_input("Contato do Cliente", value=apolice_row.get('contato', ''), key=f"contato_{apolice_id}")
+                            data_inicio_atual = apolice_row.get('data_inicio_de_vigencia')
+                            if pd.isna(data_inicio_atual): data_inicio_atual = date.today()
+                            nova_data_inicio = st.date_input("📅 Início de Vigência", value=data_inicio_atual, format="DD/MM/YYYY", key=f"data_inicio_{apolice_id}")
+                        with col2:
+                            novo_num_parcelas = st.number_input("Nº de Parcelas", min_value=1, max_value=12, value=int(apolice_row.get('numero_parcelas', 1)), key=f"parcelas_{apolice_id}")
+                            novo_email = st.text_input("E-mail do Cliente", value=apolice_row.get('email', ''), key=f"email_{apolice_id}")
+                            data_fim_atual = apolice_row.get('data_final_de_vigencia')
+                            if pd.isna(data_fim_atual): data_fim_atual = date.today()
+                            nova_data_fim = st.date_input("📅 Fim de Vigência", value=data_fim_atual, format="DD/MM/YYYY", key=f"data_fim_{apolice_id}")
+                        edit_submitted = st.form_submit_button("Salvar Alterações")
+                        if edit_submitted:
+                            update_data = {
+                                'valor_da_parcela': float(novo_valor_parcelas.replace(',', '.')),
+                                'numero_parcelas': novo_num_parcelas,
+                                'contato': novo_contato,
+                                'email': novo_email,
+                                'data_inicio_de_vigencia': nova_data_inicio,
+                                'data_final_de_vigencia': nova_data_fim
+                            }
+                            if update_apolice(apolice_id, update_data):
+                                st.success("Informações da apólice atualizadas com sucesso!")
+                                st.rerun()
+                    st.divider()
+                    st.subheader("📁 Gerenciar Anexos")
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        with st.form(f"apolice_upload_form_{apolice_id}"):
+                            st.write("**Atualizar Apólice (PDF)**")
+                            apolice_pdf_file = st.file_uploader("Selecione a nova versão da apólice", type=["pdf"], key=f"apolice_pdf_{apolice_id}")
+                            apolice_upload_submitted = st.form_submit_button("Substituir PDF da Apólice")
+                            if apolice_upload_submitted and apolice_pdf_file:
+                                st.info("Fazendo upload da nova apólice...")
+                                novo_caminho = salvar_ficheiros_gcs([apolice_pdf_file], apolice_row['numero_apolice'], apolice_row['cliente'], 'apolices')
+                                if novo_caminho:
+                                    if update_apolice(apolice_id, {'caminho_pdf': novo_caminho[0]}):
+                                        st.success("PDF da apólice substituído com sucesso!")
+                                        st.rerun()
+                    with col2:
+                        with st.form(f"boleto_upload_form_{apolice_id}"):
+                            st.write("**Anexar Novo Boleto**")
+                            boleto_pdf_file = st.file_uploader("Selecione o novo boleto", type=["pdf"], key=f"boleto_pdf_{apolice_id}")
+                            boleto_upload_submitted = st.form_submit_button("Anexar Boleto")
+                            if boleto_upload_submitted and boleto_pdf_file:
+                                st.info("Fazendo upload do boleto...")
+                                novo_caminho_boleto = salvar_ficheiros_gcs([boleto_pdf_file], apolice_row['numero_apolice'], apolice_row['cliente'], 'boletos')
+                                if novo_caminho_boleto:
+                                    add_boletos_db(apolice_id, [(novo_caminho_boleto[0], boleto_pdf_file.name)])
+                                    st.success("Novo boleto anexado com sucesso!")
+                                    st.rerun()
+                    st.divider()
+                    st.subheader("Zona de Perigo")
+                    with st.form(f"delete_form_{apolice_id}"):
+                        st.warning("Atenção: Apagar uma apólice é uma ação permanente e não pode ser desfeita.")
+                        delete_submitted = st.form_submit_button("🗑️ Apagar Apólice Permanentemente")
+                        if delete_submitted:
+                            if delete_apolice(apolice_id):
+                                st.success("Apólice apagada com sucesso!")
+                                st.rerun()
 
 def render_cadastro_form():
     st.title("➕ Cadastrar Nova Apólice")
