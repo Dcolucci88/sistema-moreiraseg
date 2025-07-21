@@ -301,36 +301,36 @@ def login_user(email, senha):
 # --- RENDERIZAÇÃO DA INTERFACE (a maioria sem alterações) ---
 
 def render_dashboard():
-    st.title("📊 Painel de Controle")
-    apolices_df = get_apolices()
-    if apolices_df.empty:
-        st.info("Nenhuma apólice cadastrada. Comece adicionando uma no menu 'Cadastrar Apólice'.")
-        return
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Total de Apólices", len(apolices_df))
-    pendentes_df = apolices_df[apolices_df['status'] == 'Pendente']
-    col2.metric("Apólices Pendentes", len(pendentes_df))
-    valor_pendente = pendentes_df['valor_da_parcela'].sum()
-    col3.metric("Valor Total Pendente", f"R${valor_pendente:,.2f}")
-    urgentes_df = apolices_df[apolices_df['dias_restantes'].fillna(999) <= 15]
-    col4.metric("Apólices Urgentes", len(urgentes_df), "Vencem em até 15 dias")
-    st.divider()
-    st.subheader("Apólices por Prioridade de Renovação")
-    prioridades_map = {
-        '🔥 Urgente': apolices_df[apolices_df['prioridade'] == '🔥 Urgente'], 
-        '⚠️ Alta': apolices_df[apolices_df['prioridade'] == '⚠️ Alta'], 
-        '⚠️ Média': apolices_df[apolices_df['prioridade'] == '⚠️ Média'], 
-        '✅ Baixa': apolices_df[apolices_df['prioridade'] == '✅ Baixa'],
-        '⚪ Indefinida': apolices_df[apolices_df['prioridade'] == '⚪ Indefinida']
-    }
-    tabs = st.tabs(prioridades_map.keys())
-    cols_to_show = ['cliente', 'numero_apolice', 'tipo_seguro', 'dias_restantes', 'status']
-    for tab, (prioridade, df) in zip(tabs, prioridades_map.items()):
-        with tab:
-            if not df.empty:
-                st.dataframe(df[cols_to_show], use_container_width=True)
-            else:
-                st.info(f"Nenhuma apólice com prioridade '{prioridade.split(' ')[-1]}'.")
+    st.title("📊 Painel de Controle")
+    apolices_df = get_apolices()
+    if apolices_df.empty:
+        st.info("Nenhuma apólice cadastrada. Comece adicionando uma no menu 'Cadastrar Apólice'.")
+        return
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Total de Apólices", len(apolices_df))
+    pendentes_df = apolices_df[apolices_df['status'] == 'Pendente']
+    col2.metric("Apólices Pendentes", len(pendentes_df))
+    valor_pendente = pendentes_df['valor_da_parcela'].sum()
+    col3.metric("Valor Total Pendente", f"R${valor_pendente:,.2f}")
+    urgentes_df = apolices_df[apolices_df['dias_restantes'].fillna(999) <= 15]
+    col4.metric("Apólices Urgentes", len(urgentes_df), "Vencem em até 15 dias")
+    st.divider()
+    st.subheader("Apólices por Prioridade de Renovação")
+    prioridades_map = {
+        '🔥 Urgente': apolices_df[apolices_df['prioridade'] == '🔥 Urgente'],
+        '⚠️ Alta': apolices_df[apolices_df['prioridade'] == '⚠️ Alta'],
+        '⚠️ Média': apolices_df[apolices_df['prioridade'] == '⚠️ Média'],
+        '✅ Baixa': apolices_df[apolices_df['prioridade'] == '✅ Baixa'],
+        '⚪ Indefinida': apolices_df[apolices_df['prioridade'] == '⚪ Indefinida']
+    }
+    tabs = st.tabs(prioridades_map.keys())
+    cols_to_show = ['cliente', 'numero_apolice', 'tipo_seguro', 'dias_restantes', 'status']
+    for tab, (prioridade, df) in zip(tabs, prioridades_map.items()):
+        with tab:
+            if not df.empty:
+                st.dataframe(df[cols_to_show], use_container_width=True)
+            else:
+                st.info(f"Nenhuma apólice com prioridade '{prioridade.split(' ')[-1]}'.")
 
 def render_pesquisa_e_edicao():
     st.title("🔍 Pesquisar e Editar Apólice")
