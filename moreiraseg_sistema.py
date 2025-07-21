@@ -1,5 +1,5 @@
 # moreiraseg_sistema.py
-# VERSÃO ADAPTADA PARA SUPABASE COM ST.CONNECTION
+# VERSÃO COMPLETA E CORRIGIDA PARA SUPABASE
 
 import streamlit as st
 import pandas as pd
@@ -29,8 +29,6 @@ LOGO_PATH = os.path.join(ASSETS_DIR, "logo_azul.png")
 ICONE_PATH = os.path.join(ASSETS_DIR, "Icone.png")
 
 # --- CONEXÃO COM O BANCO DE DADOS (MÉTODO MODERNO) ---
-# Inicializa a conexão com o banco de dados usando os segredos do Streamlit.
-# O Streamlit automaticamente encontrará a seção [connections.postgresql] no seu secrets.toml
 try:
     conn = st.connection("postgresql", type="sql")
 except Exception as e:
@@ -44,7 +42,6 @@ except Exception as e:
 def init_db():
     """
     Inicializa o banco de dados, cria e atualiza as tabelas conforme necessário.
-    Usa conn.session para executar múltiplos comandos em uma transação.
     """
     try:
         with conn.session as s:
@@ -67,12 +64,7 @@ def init_db():
                 "valor_primeira_parcela": "REAL"
             }
             for coluna, tipo in colunas_para_adicionar.items():
-                # Usa a sintaxe da SQLAlchemy para evitar SQL Injection
-                check_col_query = text("""
-                    SELECT column_name
-                    FROM information_schema.columns
-                    WHERE table_name='apolices' AND column_name=:col
-                """)
+                check_col_query = text("SELECT column_name FROM information_schema.columns WHERE table_name='apolices' AND column_name=:col")
                 if not s.execute(check_col_query, {"col": coluna}).fetchone():
                     s.execute(text(f"ALTER TABLE apolices ADD COLUMN {coluna} {tipo}"))
 
@@ -108,7 +100,6 @@ def init_db():
                 )
             '''))
             
-            # Adiciona usuário administrador se não existir
             user_exists = s.execute(text("SELECT id FROM usuarios WHERE email = :email"), {'email': 'adm@moreiraseg.com.br'}).fetchone()
             if not user_exists:
                 s.execute(
@@ -121,7 +112,7 @@ def init_db():
         st.stop()
 
 
-# --- FUNÇÕES DE UPLOAD (Com indentação corrigida) ---
+# --- FUNÇÕES DE UPLOAD ---
 def salvar_ficheiros_gcs(ficheiros, numero_apolice, cliente, tipo_pasta):
     if not isinstance(ficheiros, list):
         ficheiros = [ficheiros]
@@ -147,7 +138,9 @@ def salvar_ficheiros_gcs(ficheiros, numero_apolice, cliente, tipo_pasta):
     except Exception as e:
         st.error(f"❌ Falha no upload para o Google Cloud Storage: {e}")
         return []
-# --- FUNÇÕES DE LÓGICA DO SISTEMA (ATUALIZADAS) ---
+
+
+# --- FUNÇÕES DE LÓGICA DO SISTEMA ---
 
 def add_historico(apolice_id, usuario_email, acao, detalhes=""):
     try:
@@ -197,8 +190,7 @@ def add_apolice(data):
             )
             RETURNING id
         '''
-        # .execute() retorna um objeto Result; .scalar_one() pega o primeiro valor da primeira linha.
-        apolice_id = conn.execute(query, params=data).scalar_one()
+        apolice_id = conn.execute(text(query), params=data).scalar_one()
 
         add_historico(
             apolice_id,
@@ -220,7 +212,6 @@ def update_apolice(apolice_id, update_data):
         set_clause = ", ".join([f"{key} = :{key}" for key in update_data.keys()])
         query = f"UPDATE apolices SET {set_clause} WHERE id = :apolice_id"
         
-        # Adiciona o apolice_id ao dicionário de parâmetros
         params = update_data.copy()
         params['apolice_id'] = apolice_id
         
@@ -242,7 +233,6 @@ def delete_apolice(apolice_id):
         return False
 
 def get_apolices(search_term=None):
-    """Busca apólices usando o cache nativo do st.connection."""
     try:
         query = "SELECT * FROM apolices"
         params = {}
@@ -251,7 +241,6 @@ def get_apolices(search_term=None):
             params['term'] = f"%{search_term}%"
         query += " ORDER BY data_final_de_vigencia ASC"
         
-        # conn.query usa cache automaticamente. ttl=60 significa que os dados serão atualizados a cada 60 segundos.
         df = conn.query(query, params=params, ttl=60)
     except Exception as e:
         st.error(f"Erro ao carregar apólices: {e}")
@@ -275,7 +264,6 @@ def get_apolices(search_term=None):
 
 def get_apolice_details(apolice_id):
     try:
-        # conn.query retorna um DataFrame. Pegamos a primeira linha.
         apolice_df = conn.query("SELECT * FROM apolices WHERE id = :id", params={'id': apolice_id}, ttl=10)
         historico_df = conn.query("SELECT * FROM historico WHERE apolice_id = :id ORDER BY data_acao DESC", params={'id': apolice_id}, ttl=10)
         
@@ -289,7 +277,6 @@ def get_apolice_details(apolice_id):
 
 def login_user(email, senha):
     try:
-        # conn.query retorna um DataFrame. Pegamos a primeira linha.
         user_df = conn.query("SELECT * FROM usuarios WHERE email = :email AND senha = :senha", params={'email': email, 'senha': senha}, ttl=10)
         if not user_df.empty:
             return user_df.to_dict('records')[0]
@@ -298,7 +285,7 @@ def login_user(email, senha):
         st.error(f"Erro durante o login: {e}")
         return None
 
-# --- RENDERIZAÇÃO DA INTERFACE (a maioria sem alterações) ---
+# --- RENDERIZAÇÃO DA INTERFACE ---
 
 def render_dashboard():
     st.title("📊 Painel de Controle")
@@ -410,89 +397,89 @@ def render_pesquisa_e_edicao():
                                 st.rerun()
 
 def render_cadastro_form():
-    st.title("➕ Cadastrar Nova Apólice")
-    with st.form("form_cadastro", clear_on_submit=True):
-        st.subheader("Dados da Apólice")
-        col1, col2 = st.columns(2)
-        with col1:
-            seguradora = st.text_input("Seguradora*", max_chars=50)
-            numero_apolice = st.text_input("Número da Apólice*", max_chars=50)
-            tipo_seguro = st.selectbox("Tipo de Seguro*", ["Automóvel", "RCO", "Vida", "Residencial", "Empresarial", "Saúde", "Viagem", "Fiança", "Outro"])
-            data_inicio = st.date_input("📅 Início de Vigência*", format="DD/MM/YYYY")
-        with col2:
-            cliente = st.text_input("Cliente*", max_chars=100)
-            placa = st.text_input("🚗 Placa do Veículo (Obrigatório para Auto/RCO)", max_chars=10)
-            tipo_cobranca = st.selectbox("Tipo de Cobrança*", ["Boleto", "Faturamento", "Cartão de Crédito", "Débito em Conta"])
-            data_fim_calculada = data_inicio + timedelta(days=365)
-            st.date_input("📅 Fim de Vigência (Automático)", value=data_fim_calculada, format="DD/MM/YYYY", disabled=True)
-        
-        st.subheader("Valores e Comissão")
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            valor_primeira_parcela = st.text_input("💰 Valor da 1ª Parcela (R$)", value="0,00")
-        with col2:
-            valor_demais_parcelas = st.text_input("💰 Valor das Demais Parcelas (R$)*", value="0,00")
-        with col3:
-            numero_parcelas = st.selectbox("Nº de Parcelas", options=list(range(1, 13)), index=0)
-        with col4:
-            comissao = st.number_input("💼 Comissão (%)", min_value=0.0, max_value=100.0, value=10.0, step=0.5, format="%.2f")
-        st.subheader("Dados de Contato e Outros")
-        contato = st.text_input("📱 Contato do Cliente*", max_chars=100)
-        email = st.text_input("📧 E-mail do Cliente", max_chars=100)
-        observacoes = st.text_area("📝 Observações", height=100)
-        st.subheader("Anexos")
-        pdf_file = st.file_uploader("📎 Anexar PDF da Apólice (Opcional)", type=["pdf"])
-        boletos_files = st.file_uploader("📎 Anexar Boletos (Opcional)", type=["pdf"], accept_multiple_files=True)
-        submitted = st.form_submit_button("💾 Salvar Apólice", use_container_width=True)
-        if submitted:
-            campos_obrigatorios = {
-                "Seguradora": seguradora, "Cliente": cliente, "Número da Apólice": numero_apolice,
-                "Valor das Demais Parcelas": valor_demais_parcelas, "Contato": contato
-            }
-            campos_vazios = [nome for nome, valor in campos_obrigatorios.items() if not valor]
-            if tipo_seguro in ["Automóvel", "RCO"] and not placa:
-                campos_vazios.append("Placa (obrigatória para Auto/RCO)")
-            if campos_vazios:
-                st.error(f"Por favor, preencha os seguintes campos obrigatórios: {', '.join(campos_vazios)}")
-                return
-            caminho_pdf_apolice = None
-            if pdf_file:
-                st.info("Fazendo upload do PDF da apólice...")
-                urls = salvar_ficheiros_gcs([pdf_file], numero_apolice, cliente, 'apolices')
-                if urls:
-                    caminho_pdf_apolice = urls[0]
-                else:
-                    st.error("Falha no upload do PDF da apólice.")
-                    return
-            
-            data_fim = data_inicio + timedelta(days=365)
-            
-            apolice_data = {
-                'seguradora': seguradora, 'cliente': cliente, 'numero_apolice': numero_apolice,
-                'placa': placa, 'tipo_seguro': tipo_seguro, 'tipo_cobranca': tipo_cobranca,
-                'numero_parcelas': int(numero_parcelas), 'valor_primeira_parcela': valor_primeira_parcela,
-                'valor_da_parcela': valor_demais_parcelas, 'comissao': comissao,
-                'data_inicio_de_vigencia': data_inicio, 'data_final_de_vigencia': data_fim,
-                'contato': contato, 'email': email, 'observacoes': observacoes,
-                'status': 'Ativa', 'caminho_pdf': caminho_pdf_apolice if caminho_pdf_apolice else ""
-            }
-            apolice_id = add_apolice(apolice_data)
-            if apolice_id:
-                st.success(f"🎉 Apólice '{numero_apolice}' cadastrada com sucesso!")
-                if caminho_pdf_apolice:
-                    st.success("PDF da apólice salvo na nuvem!")
-                if boletos_files:
-                    st.info("Fazendo upload dos boletos...")
-                    urls_boletos = salvar_ficheiros_gcs(boletos_files, numero_apolice, cliente, 'boletos')
-                    if urls_boletos:
-                        boletos_info = list(zip(urls_boletos, [f.name for f in boletos_files]))
-                        add_boletos_db(apolice_id, boletos_info)
-                        st.success(f"{len(urls_boletos)} boleto(s) salvo(s) na nuvem com sucesso!")
-                    else:
-                        st.warning("A apólice foi salva, mas ocorreu uma falha no upload dos boletos.")
-                st.balloons()
-            else:
-                st.error("Falha ao salvar a apólice no banco de dados.")
+    st.title("➕ Cadastrar Nova Apólice")
+    with st.form("form_cadastro", clear_on_submit=True):
+        st.subheader("Dados da Apólice")
+        col1, col2 = st.columns(2)
+        with col1:
+            seguradora = st.text_input("Seguradora*", max_chars=50)
+            numero_apolice = st.text_input("Número da Apólice*", max_chars=50)
+            tipo_seguro = st.selectbox("Tipo de Seguro*", ["Automóvel", "RCO", "Vida", "Residencial", "Empresarial", "Saúde", "Viagem", "Fiança", "Outro"])
+            data_inicio = st.date_input("📅 Início de Vigência*", format="DD/MM/YYYY")
+        with col2:
+            cliente = st.text_input("Cliente*", max_chars=100)
+            placa = st.text_input("🚗 Placa do Veículo (Obrigatório para Auto/RCO)", max_chars=10)
+            tipo_cobranca = st.selectbox("Tipo de Cobrança*", ["Boleto", "Faturamento", "Cartão de Crédito", "Débito em Conta"])
+            data_fim_calculada = data_inicio + timedelta(days=365)
+            st.date_input("📅 Fim de Vigência (Automático)", value=data_fim_calculada, format="DD/MM/YYYY", disabled=True)
+        
+        st.subheader("Valores e Comissão")
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            valor_primeira_parcela = st.text_input("💰 Valor da 1ª Parcela (R$)", value="0,00")
+        with col2:
+            valor_demais_parcelas = st.text_input("💰 Valor das Demais Parcelas (R$)*", value="0,00")
+        with col3:
+            numero_parcelas = st.selectbox("Nº de Parcelas", options=list(range(1, 13)), index=0)
+        with col4:
+            comissao = st.number_input("💼 Comissão (%)", min_value=0.0, max_value=100.0, value=10.0, step=0.5, format="%.2f")
+        st.subheader("Dados de Contato e Outros")
+        contato = st.text_input("📱 Contato do Cliente*", max_chars=100)
+        email = st.text_input("📧 E-mail do Cliente", max_chars=100)
+        observacoes = st.text_area("📝 Observações", height=100)
+        st.subheader("Anexos")
+        pdf_file = st.file_uploader("📎 Anexar PDF da Apólice (Opcional)", type=["pdf"])
+        boletos_files = st.file_uploader("📎 Anexar Boletos (Opcional)", type=["pdf"], accept_multiple_files=True)
+        submitted = st.form_submit_button("💾 Salvar Apólice", use_container_width=True)
+        if submitted:
+            campos_obrigatorios = {
+                "Seguradora": seguradora, "Cliente": cliente, "Número da Apólice": numero_apolice,
+                "Valor das Demais Parcelas": valor_demais_parcelas, "Contato": contato
+            }
+            campos_vazios = [nome for nome, valor in campos_obrigatorios.items() if not valor]
+            if tipo_seguro in ["Automóvel", "RCO"] and not placa:
+                campos_vazios.append("Placa (obrigatória para Auto/RCO)")
+            if campos_vazios:
+                st.error(f"Por favor, preencha os seguintes campos obrigatórios: {', '.join(campos_vazios)}")
+                return
+            caminho_pdf_apolice = None
+            if pdf_file:
+                st.info("Fazendo upload do PDF da apólice...")
+                urls = salvar_ficheiros_gcs([pdf_file], numero_apolice, cliente, 'apolices')
+                if urls:
+                    caminho_pdf_apolice = urls[0]
+                else:
+                    st.error("Falha no upload do PDF da apólice.")
+                    return
+            
+            data_fim = data_inicio + timedelta(days=365)
+            
+            apolice_data = {
+                'seguradora': seguradora, 'cliente': cliente, 'numero_apolice': numero_apolice,
+                'placa': placa, 'tipo_seguro': tipo_seguro, 'tipo_cobranca': tipo_cobranca,
+                'numero_parcelas': int(numero_parcelas), 'valor_primeira_parcela': valor_primeira_parcela,
+                'valor_da_parcela': valor_demais_parcelas, 'comissao': comissao,
+                'data_inicio_de_vigencia': data_inicio, 'data_final_de_vigencia': data_fim,
+                'contato': contato, 'email': email, 'observacoes': observacoes,
+                'status': 'Ativa', 'caminho_pdf': caminho_pdf_apolice if caminho_pdf_apolice else ""
+            }
+            apolice_id = add_apolice(apolice_data)
+            if apolice_id:
+                st.success(f"🎉 Apólice '{numero_apolice}' cadastrada com sucesso!")
+                if caminho_pdf_apolice:
+                    st.success("PDF da apólice salvo na nuvem!")
+                if boletos_files:
+                    st.info("Fazendo upload dos boletos...")
+                    urls_boletos = salvar_ficheiros_gcs(boletos_files, numero_apolice, cliente, 'boletos')
+                    if urls_boletos:
+                        boletos_info = list(zip(urls_boletos, [f.name for f in boletos_files]))
+                        add_boletos_db(apolice_id, boletos_info)
+                        st.success(f"{len(urls_boletos)} boleto(s) salvo(s) na nuvem com sucesso!")
+                    else:
+                        st.warning("A apólice foi salva, mas ocorreu uma falha no upload dos boletos.")
+                st.balloons()
+            else:
+                st.error("Falha ao salvar a apólice no banco de dados.")
 
 def render_configuracoes():
     st.title("⚙️ Configurações do Sistema")
@@ -500,7 +487,6 @@ def render_configuracoes():
     with tab1:
         st.subheader("Usuários Cadastrados")
         try:
-            # Atualizado para conn.query
             usuarios_df = conn.query("SELECT id, nome, email, perfil, data_cadastro FROM usuarios", ttl=10)
             st.dataframe(usuarios_df, use_container_width=True)
         except Exception as e:
@@ -518,7 +504,7 @@ def render_configuracoes():
                     else:
                         try:
                             conn.execute(
-                                "INSERT INTO usuarios (nome, email, senha, perfil) VALUES (:nome, :email, :senha, :perfil)",
+                                text("INSERT INTO usuarios (nome, email, senha, perfil) VALUES (:nome, :email, :senha, :perfil)"),
                                 params={'nome': nome, 'email': email, 'senha': senha, 'perfil': perfil}
                             )
                             st.success(f"Usuário '{nome}' adicionado com sucesso!")
@@ -529,7 +515,6 @@ def render_configuracoes():
                             st.error(f"Erro ao adicionar usuário: {e}")
     with tab2:
         st.subheader("Backup de Dados (Exportar)")
-        # Atualizado para conn.query
         all_data_df = conn.query("SELECT * FROM apolices", ttl=10)
         csv_data = all_data_df.to_csv(index=False).encode('utf-8')
         st.download_button(
@@ -540,88 +525,87 @@ def render_configuracoes():
         )
 
 def main():
-    """Função principal que renderiza a aplicação Streamlit."""
-    st.set_page_config(
-        page_title="Moreiraseg - Gestão de Apólices",
-        page_icon=ICONE_PATH,
-        layout="wide",
-        initial_sidebar_state="expanded"
-    )
+    st.set_page_config(
+        page_title="Moreiraseg - Gestão de Apólices",
+        page_icon=ICONE_PATH,
+        layout="wide",
+        initial_sidebar_state="expanded"
+    )
 
-    try:
-        init_db()
+    try:
+        init_db()
 
-        if 'user_email' not in st.session_state:
-            st.session_state.user_email = None
-            st.session_state.user_nome = None
-            st.session_state.user_perfil = None
-        
-        if not st.session_state.user_email:
-            col1, col2, col3 = st.columns([1, 1.5, 1])
-            with col2:
-                try:
-                    st.image(ICONE_PATH, width=150)
-                except Exception:
-                    st.title("Sistema de Gestão de Apólices")
-                st.write("")
-                with st.form("login_form"):
-                    email = st.text_input("📧 E-mail")
-                    senha = st.text_input("🔑 Senha", type="password")
-                    submit = st.form_submit_button("Entrar", use_container_width=True)
-                    if submit:
-                        usuario = login_user(email, senha)
-                        if usuario:
-                            st.session_state.user_email = usuario['email']
-                            st.session_state.user_nome = usuario['nome']
-                            st.session_state.user_perfil = usuario['perfil']
-                            st.rerun()
-                        else:
-                            st.error("Credenciais inválidas. Tente novamente.")
-            return
+        if 'user_email' not in st.session_state:
+            st.session_state.user_email = None
+            st.session_state.user_nome = None
+            st.session_state.user_perfil = None
+        
+        if not st.session_state.user_email:
+            col1, col2, col3 = st.columns([1, 1.5, 1])
+            with col2:
+                try:
+                    st.image(ICONE_PATH, width=150)
+                except Exception:
+                    st.title("Sistema de Gestão de Apólices")
+                st.write("")
+                with st.form("login_form"):
+                    email = st.text_input("📧 E-mail")
+                    senha = st.text_input("🔑 Senha", type="password")
+                    submit = st.form_submit_button("Entrar", use_container_width=True)
+                    if submit:
+                        usuario = login_user(email, senha)
+                        if usuario:
+                            st.session_state.user_email = usuario['email']
+                            st.session_state.user_nome = usuario['nome']
+                            st.session_state.user_perfil = usuario['perfil']
+                            st.rerun()
+                        else:
+                            st.error("Credenciais inválidas. Tente novamente.")
+            return
 
-        with st.sidebar:
-            st.title(f"Olá, {st.session_state.user_nome.split()[0]}!")
-            st.write(f"Perfil: `{st.session_state.user_perfil.capitalize()}`")
-            try:
-                st.image(ICONE_PATH, width=80)
-            except Exception:
-                st.write("Menu")
-            st.divider()
-            menu_options = [
-                "📊 Painel de Controle",
-                "➕ Cadastrar Apólice",
-                "🔍 Pesquisar e Editar Apólice",
-            ]
-            if st.session_state.user_perfil == 'admin':
-                menu_options.append("⚙️ Configurações")
-            menu_opcao = st.radio("Menu Principal", menu_options)
-            st.divider()
-            if st.button("🚪 Sair do Sistema", use_container_width=True):
-                st.session_state.user_email = None
-                st.session_state.user_nome = None
-                st.session_state.user_perfil = None
-                st.rerun()
+        with st.sidebar:
+            st.title(f"Olá, {st.session_state.user_nome.split()[0]}!")
+            st.write(f"Perfil: `{st.session_state.user_perfil.capitalize()}`")
+            try:
+                st.image(ICONE_PATH, width=80)
+            except Exception:
+                st.write("Menu")
+            st.divider()
+            menu_options = [
+                "📊 Painel de Controle",
+                "➕ Cadastrar Apólice",
+                "🔍 Pesquisar e Editar Apólice",
+            ]
+            if st.session_state.user_perfil == 'admin':
+                menu_options.append("⚙️ Configurações")
+            menu_opcao = st.radio("Menu Principal", menu_options)
+            st.divider()
+            if st.button("🚪 Sair do Sistema", use_container_width=True):
+                st.session_state.user_email = None
+                st.session_state.user_nome = None
+                st.session_state.user_perfil = None
+                st.rerun()
 
-        col1, col2, col3 = st.columns([2, 3, 2])
-        with col2:
-            try:
-                st.image(LOGO_PATH)
-            except Exception as e:
-                st.warning(f"Não foi possível carregar o logótipo principal: {e}")
-        st.write("")
+        col1, col2, col3 = st.columns([2, 3, 2])
+        with col2:
+            try:
+                st.image(LOGO_PATH)
+            except Exception as e:
+                st.warning(f"Não foi possível carregar o logótipo principal: {e}")
+        st.write("")
 
-        if menu_opcao == "📊 Painel de Controle":
-            render_dashboard()
-        elif menu_opcao == "➕ Cadastrar Apólice":
-            render_cadastro_form()
-        elif menu_opcao == "🔍 Pesquisar e Editar Apólice":
-            render_pesquisa_e_edicao()
-        elif menu_opcao == "⚙️ Configurações" and st.session_state.user_perfil == 'admin':
-            render_configuracoes()
+        if menu_opcao == "📊 Painel de Controle":
+            render_dashboard()
+        elif menu_opcao == "➕ Cadastrar Apólice":
+            render_cadastro_form()
+        elif menu_opcao == "🔍 Pesquisar e Editar Apólice":
+            render_pesquisa_e_edicao()
+        elif menu_opcao == "⚙️ Configurações" and st.session_state.user_perfil == 'admin':
+            render_configuracoes()
 
-    except Exception as e:
-        st.error("Ocorreu um erro crítico na aplicação.")
-        st.exception(e)
+    except Exception as e:
+        st.error("Ocorreu um erro crítico na aplicação.")
+        st.exception(e)
 
 if __name__ == "__main__":
-    main()
+    main()
