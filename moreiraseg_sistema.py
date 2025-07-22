@@ -1,5 +1,5 @@
 # moreiraseg_sistema.py
-# VERSÃO COMPLETA E CORRIGIDA PARA SUPABASE
+# VERSÃO COMPLETA E ATUALIZADA PARA SUPABASE STORAGE
 
 import streamlit as st
 import pandas as pd
@@ -10,15 +10,15 @@ import re
 
 # Tente importar as bibliotecas necessárias, mostrando erros amigáveis.
 try:
-    from google.cloud import storage
-    from google.oauth2 import service_account
+    # NOVO: Importa a biblioteca do Supabase
+    from supabase import create_client, Client
 except ImportError:
-    st.error("Biblioteca do Google Cloud não encontrada. Verifique o seu ficheiro `requirements.txt`.")
+    st.error("Biblioteca do Supabase não encontrada. Verifique se 'supabase' está no seu `requirements.txt`.")
     st.stop()
 
 try:
     import psycopg2
-    from sqlalchemy import text # Necessário para o novo método de conexão
+    from sqlalchemy import text 
 except ImportError:
     st.error("Bibliotecas do banco de dados não encontradas. Adicione 'psycopg2-binary' e 'SQLAlchemy' ao seu `requirements.txt`.")
     st.stop()
@@ -36,9 +36,18 @@ except Exception as e:
     st.info("Verifique se seu arquivo 'secrets.toml' está configurado corretamente com a URL de conexão do Supabase.")
     st.stop()
 
+# --- NOVO: CONEXÃO COM O SUPABASE STORAGE ---
+try:
+    supabase_url = st.secrets["supabase"]["url"]
+    supabase_key = st.secrets["supabase"]["service_key"]
+    supabase: Client = create_client(supabase_url, supabase_key)
+except Exception as e:
+    st.error(f"❌ Falha ao configurar a conexão com o Supabase Storage: {e}")
+    st.info("Verifique se seu arquivo 'secrets.toml' está configurado com a seção [supabase] e as chaves 'url' e 'service_key'.")
+    st.stop()
 
-# --- FUNÇÕES DE BANCO DE DADOS (ATUALIZADAS PARA ST.CONNECTION) ---
-
+# --- FUNÇÕES DE BANCO DE DADOS (SEM ALTERAÇÕES) ---
+# ... (todas as suas funções de banco de dados como init_db, add_historico, etc., permanecem aqui sem alterações) ...
 def init_db():
     """
     Inicializa o banco de dados, cria e atualiza as tabelas conforme necessário.
@@ -112,52 +121,68 @@ def init_db():
         st.stop()
 
 
-# --- FUNÇÕES DE UPLOAD ---
-def salvar_ficheiros_gcs(ficheiros, numero_apolice, cliente, tipo_pasta):
+# --- ATUALIZADO: FUNÇÃO DE UPLOAD PARA O SUPABASE ---
+def salvar_ficheiros_supabase(ficheiros, numero_apolice, cliente, tipo_pasta):
     if not isinstance(ficheiros, list):
         ficheiros = [ficheiros]
     urls_publicas = []
+    
     try:
-        creds_info = dict(st.secrets["gcs_credentials"])
-        credentials = service_account.Credentials.from_service_account_info(creds_info)
-        bucket_name = st.secrets["gcs_bucket_name"]
-        client = storage.Client(credentials=credentials)
-        bucket = client.get_bucket(bucket_name)
+        # Pega o nome do bucket correto do secrets.toml
+        bucket_name = st.secrets["buckets"][tipo_pasta]
+        
         safe_cliente = re.sub(r'[^a-zA-Z0-9\s-]', '', cliente).strip().replace(' ', '_')
+
         for ficheiro in ficheiros:
+            # Lê os bytes do arquivo para upload
+            file_bytes = ficheiro.getvalue()
+            
             timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            destination_blob_name = f"{tipo_pasta}/{safe_cliente}/{numero_apolice}/{timestamp}_{ficheiro.name}"
-            blob = bucket.blob(destination_blob_name)
-            blob.upload_from_file(ficheiro, content_type=ficheiro.type)
-            blob.make_public()
-            urls_publicas.append(blob.public_url)
+            # O Supabase usa a pasta como parte do caminho do arquivo
+            destination_path = f"{tipo_pasta}/{safe_cliente}/{numero_apolice}/{timestamp}_{ficheiro.name}"
+            
+            # Faz o upload usando o cliente Supabase
+            supabase.storage.from_(bucket_name).upload(
+                path=destination_path,
+                file=file_bytes,
+                file_options={"content-type": ficheiro.type}
+            )
+            
+            # Obtém a URL pública do arquivo recém-enviado
+            public_url = supabase.storage.from_(bucket_name).get_public_url(destination_path)
+            urls_publicas.append(public_url)
+            
         return urls_publicas
+
     except KeyError as e:
-        st.error(f"Erro de chave nos 'Secrets': A chave '{e}' não foi encontrada.")
+        st.error(f"Erro de chave nos 'Secrets': A chave '{e}' não foi encontrada na seção [buckets] ou [supabase].")
         return []
     except Exception as e:
-        st.error(f"❌ Falha no upload para o Google Cloud Storage: {e}")
+        st.error(f"❌ Falha no upload para o Supabase Storage: {e}")
         return []
 
-
-# --- FUNÇÕES DE LÓGICA DO SISTEMA ---
-
+# --- FUNÇÕES DE LÓGICA DO SISTEMA (ATUALIZADAS PARA USAR A NOVA FUNÇÃO DE UPLOAD) ---
+# ... (a maioria das funções permanece igual, apenas as chamadas para upload são atualizadas) ...
 def add_historico(apolice_id, usuario_email, acao, detalhes=""):
     try:
-        conn.execute(
-            'INSERT INTO historico (apolice_id, usuario, acao, detalhes) VALUES (:apolice_id, :usuario, :acao, :detalhes)',
-            params={'apolice_id': apolice_id, 'usuario': usuario_email, 'acao': acao, 'detalhes': detalhes}
-        )
+        with conn.session as s:
+            s.execute(
+                text('INSERT INTO historico (apolice_id, usuario, acao, detalhes) VALUES (:apolice_id, :usuario, :acao, :detalhes)'),
+                {'apolice_id': apolice_id, 'usuario': usuario_email, 'acao': acao, 'detalhes': detalhes}
+            )
+            s.commit()
     except Exception as e:
         st.warning(f"⚠️ Não foi possível registrar a ação no histórico: {e}")
 
 def add_boletos_db(apolice_id, boletos_info):
     try:
-        for url, nome in boletos_info:
-            conn.execute(
-                'INSERT INTO boletos (apolice_id, caminho_pdf, nome_arquivo) VALUES (:apolice_id, :caminho_pdf, :nome_arquivo)',
-                params={'apolice_id': apolice_id, 'caminho_pdf': url, 'nome_arquivo': nome}
-            )
+        with conn.session as s:
+            for url, nome in boletos_info:
+                s.execute(
+                    text('INSERT INTO boletos (apolice_id, caminho_pdf, nome_arquivo) VALUES (:apolice_id, :caminho_pdf, :nome_arquivo)'),
+                    {'apolice_id': apolice_id, 'caminho_pdf': url, 'nome_arquivo': nome}
+                )
+            s.commit()
     except Exception as e:
         st.error(f"❌ Erro ao salvar informações dos boletos no banco de dados: {e}")
 
@@ -176,21 +201,23 @@ def add_apolice(data):
         return None
 
     try:
-        query = '''
-            INSERT INTO apolices (
-                seguradora, cliente, numero_apolice, placa, tipo_seguro, tipo_cobranca,
-                numero_parcelas, valor_primeira_parcela, valor_da_parcela, comissao,
-                data_inicio_de_vigencia, data_final_de_vigencia, contato, email,
-                observacoes, status, caminho_pdf
-            ) VALUES (
-                :seguradora, :cliente, :numero_apolice, :placa, :tipo_seguro, :tipo_cobranca,
-                :numero_parcelas, :valor_primeira_parcela, :valor_da_parcela, :comissao,
-                :data_inicio_de_vigencia, :data_final_de_vigencia, :contato, :email,
-                :observacoes, :status, :caminho_pdf
-            )
-            RETURNING id
-        '''
-        apolice_id = conn.execute(text(query), params=data).scalar_one()
+        with conn.session as s:
+            query = text('''
+                INSERT INTO apolices (
+                    seguradora, cliente, numero_apolice, placa, tipo_seguro, tipo_cobranca,
+                    numero_parcelas, valor_primeira_parcela, valor_da_parcela, comissao,
+                    data_inicio_de_vigencia, data_final_de_vigencia, contato, email,
+                    observacoes, status, caminho_pdf
+                ) VALUES (
+                    :seguradora, :cliente, :numero_apolice, :placa, :tipo_seguro, :tipo_cobranca,
+                    :numero_parcelas, :valor_primeira_parcela, :valor_da_parcela, :comissao,
+                    :data_inicio_de_vigencia, :data_final_de_vigencia, :contato, :email,
+                    :observacoes, :status, :caminho_pdf
+                )
+                RETURNING id
+            ''')
+            apolice_id = s.execute(query, data).scalar_one()
+            s.commit()
 
         add_historico(
             apolice_id,
@@ -208,14 +235,16 @@ def add_apolice(data):
 
 def update_apolice(apolice_id, update_data):
     try:
-        update_data['data_atualizacao'] = datetime.datetime.now(datetime.timezone.utc)
-        set_clause = ", ".join([f"{key} = :{key}" for key in update_data.keys()])
-        query = f"UPDATE apolices SET {set_clause} WHERE id = :apolice_id"
-        
-        params = update_data.copy()
-        params['apolice_id'] = apolice_id
-        
-        conn.execute(text(query), params=params)
+        with conn.session as s:
+            update_data['data_atualizacao'] = datetime.datetime.now(datetime.timezone.utc)
+            set_clause = ", ".join([f"{key} = :{key}" for key in update_data.keys()])
+            query = text(f"UPDATE apolices SET {set_clause} WHERE id = :apolice_id")
+            
+            params = update_data.copy()
+            params['apolice_id'] = apolice_id
+            
+            s.execute(query, params)
+            s.commit()
 
         detalhes = f"Campos atualizados: {', '.join(update_data.keys())}"
         add_historico(apolice_id, st.session_state.get('user_email', 'sistema'), 'Atualização', detalhes)
@@ -226,12 +255,15 @@ def update_apolice(apolice_id, update_data):
 
 def delete_apolice(apolice_id):
     try:
-        conn.execute('DELETE FROM apolices WHERE id = :id', params={'id': apolice_id})
+        with conn.session as s:
+            s.execute(text('DELETE FROM apolices WHERE id = :id'), {'id': apolice_id})
+            s.commit()
         return True
     except Exception as e:
         st.error(f"❌ Erro ao apagar a apólice: {e}")
         return False
 
+# ... (o restante das suas funções get_apolices, get_apolice_details, login_user, etc. permanecem iguais) ...
 def get_apolices(search_term=None):
     try:
         query = "SELECT * FROM apolices"
@@ -285,8 +317,8 @@ def login_user(email, senha):
         st.error(f"Erro durante o login: {e}")
         return None
 
-# --- RENDERIZAÇÃO DA INTERFACE ---
 
+# --- RENDERIZAÇÃO DA INTERFACE (com as chamadas de função de upload atualizadas) ---
 def render_dashboard():
     st.title("📊 Painel de Controle")
     apolices_df = get_apolices()
@@ -369,7 +401,8 @@ def render_pesquisa_e_edicao():
                             apolice_upload_submitted = st.form_submit_button("Substituir PDF da Apólice")
                             if apolice_upload_submitted and apolice_pdf_file:
                                 st.info("Fazendo upload da nova apólice...")
-                                novo_caminho = salvar_ficheiros_gcs([apolice_pdf_file], apolice_row['numero_apolice'], apolice_row['cliente'], 'apolices')
+                                # ATUALIZADO
+                                novo_caminho = salvar_ficheiros_supabase([apolice_pdf_file], apolice_row['numero_apolice'], apolice_row['cliente'], 'apolices')
                                 if novo_caminho:
                                     if update_apolice(apolice_id, {'caminho_pdf': novo_caminho[0]}):
                                         st.success("PDF da apólice substituído com sucesso!")
@@ -381,7 +414,8 @@ def render_pesquisa_e_edicao():
                             boleto_upload_submitted = st.form_submit_button("Anexar Boleto")
                             if boleto_upload_submitted and boleto_pdf_file:
                                 st.info("Fazendo upload do boleto...")
-                                novo_caminho_boleto = salvar_ficheiros_gcs([boleto_pdf_file], apolice_row['numero_apolice'], apolice_row['cliente'], 'boletos')
+                                # ATUALIZADO
+                                novo_caminho_boleto = salvar_ficheiros_supabase([boleto_pdf_file], apolice_row['numero_apolice'], apolice_row['cliente'], 'boletos')
                                 if novo_caminho_boleto:
                                     add_boletos_db(apolice_id, [(novo_caminho_boleto[0], boleto_pdf_file.name)])
                                     st.success("Novo boleto anexado com sucesso!")
@@ -445,7 +479,8 @@ def render_cadastro_form():
             caminho_pdf_apolice = None
             if pdf_file:
                 st.info("Fazendo upload do PDF da apólice...")
-                urls = salvar_ficheiros_gcs([pdf_file], numero_apolice, cliente, 'apolices')
+                # ATUALIZADO
+                urls = salvar_ficheiros_supabase([pdf_file], numero_apolice, cliente, 'apolices')
                 if urls:
                     caminho_pdf_apolice = urls[0]
                 else:
@@ -470,7 +505,8 @@ def render_cadastro_form():
                     st.success("PDF da apólice salvo na nuvem!")
                 if boletos_files:
                     st.info("Fazendo upload dos boletos...")
-                    urls_boletos = salvar_ficheiros_gcs(boletos_files, numero_apolice, cliente, 'boletos')
+                    # ATUALIZADO
+                    urls_boletos = salvar_ficheiros_supabase(boletos_files, numero_apolice, cliente, 'boletos')
                     if urls_boletos:
                         boletos_info = list(zip(urls_boletos, [f.name for f in boletos_files]))
                         add_boletos_db(apolice_id, boletos_info)
@@ -491,7 +527,7 @@ def render_configuracoes():
             st.dataframe(usuarios_df, use_container_width=True)
         except Exception as e:
             st.error(f"Erro ao listar usuários: {e}")
-            
+        
         with st.expander("Adicionar Novo Usuário"):
             with st.form("form_novo_usuario", clear_on_submit=True):
                 nome = st.text_input("Nome Completo")
@@ -503,10 +539,12 @@ def render_configuracoes():
                         st.warning("Todos os campos são obrigatórios.")
                     else:
                         try:
-                            conn.execute(
-                                text("INSERT INTO usuarios (nome, email, senha, perfil) VALUES (:nome, :email, :senha, :perfil)"),
-                                params={'nome': nome, 'email': email, 'senha': senha, 'perfil': perfil}
-                            )
+                            with conn.session as s:
+                                s.execute(
+                                    text("INSERT INTO usuarios (nome, email, senha, perfil) VALUES (:nome, :email, :senha, :perfil)"),
+                                    {'nome': nome, 'email': email, 'senha': senha, 'perfil': perfil}
+                                )
+                                s.commit()
                             st.success(f"Usuário '{nome}' adicionado com sucesso!")
                             st.rerun()
                         except psycopg2.errors.UniqueViolation:
@@ -516,13 +554,16 @@ def render_configuracoes():
     with tab2:
         st.subheader("Backup de Dados (Exportar)")
         all_data_df = conn.query("SELECT * FROM apolices", ttl=10)
-        csv_data = all_data_df.to_csv(index=False).encode('utf-8')
-        st.download_button(
-            label="📥 Exportar Backup Completo (CSV)",
-            data=csv_data,
-            file_name=f"backup_completo_apolices_{date.today()}.csv",
-            mime="text/csv"
-        )
+        if not all_data_df.empty:
+            csv_data = all_data_df.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="📥 Exportar Backup Completo (CSV)",
+                data=csv_data,
+                file_name=f"backup_completo_apolices_{date.today()}.csv",
+                mime="text/csv"
+            )
+        else:
+            st.info("Nenhuma apólice para exportar.")
 
 def main():
     st.set_page_config(
