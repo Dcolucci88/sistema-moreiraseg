@@ -1,10 +1,9 @@
 # Dependências do Streamlit
 streamlit
 pandas
-google-cloud-storage
-google-auth
 requests
 SQLAlchemy
+supabase
 
 # Dependências da API
 fastapi
