@@ -251,10 +251,29 @@ def render_dashboard():
 
 
 def render_cadastro_form():
-    """FUNÇÃO ATUALIZADA: Formulário de cadastro com a nova lógica de parcelas."""
+    """FUNÇÃO ATUALIZADA: Formulário de cadastro com lógica condicional para Frota e Boleto a Vista."""
     st.title("➕ Cadastrar Nova Apólice")
+
+    # --- NOVO: Inicialização do st.session_state para controle da UI ---
+    # Garante que os valores persistam entre as interações do usuário no formulário.
+    if 'is_frota' not in st.session_state:
+        st.session_state.is_frota = False
+    # Define um valor padrão para 'tipo_cobranca' se ele ainda não existir
+    if 'tipo_cobranca' not in st.session_state:
+        st.session_state.tipo_cobranca = "Boleto" 
+
     with st.form("form_cadastro", clear_on_submit=False):
         st.subheader("Dados da Apólice")
+
+        # --- NOVO: Lógica do botão de alternância para Frota ---
+        # O widget st.toggle é mais moderno que um checkbox.
+        # A chave 'toggle_frota' garante que o estado do botão seja salvo.
+        st.session_state.is_frota = st.toggle(
+            "É uma apólice de Frota?",
+            key="toggle_frota", 
+            value=st.session_state.is_frota 
+        )
+
         col1, col2 = st.columns(2)
         with col1:
             seguradora = st.text_input("Seguradora*", max_chars=50)
@@ -262,8 +281,41 @@ def render_cadastro_form():
             tipo_seguro = st.selectbox("Tipo de Seguro*", ["Automóvel", "RCO", "Vida", "Residencial", "Empresarial", "Saúde", "Viagem", "Fiança", "Outro"])
         with col2:
             cliente = st.text_input("Cliente*", max_chars=100)
-            placa = st.text_input("🚗 Placa do Veículo (Opcional)", max_chars=10)
-            tipo_cobranca = st.selectbox("Tipo de Cobrança*", ["Boleto", "Faturamento", "Cartão de Crédito", "Débito em Conta"])
+            
+            # --- NOVO: Campo de placa condicional ---
+            if st.session_state.is_frota:
+                # Se for frota, mostra uma área de texto para múltiplas placas
+                placas_input = st.text_area("Placas da Frota (uma por linha)*", height=105, help="Digite cada placa em uma nova linha.")
+                placa_unica_input = "" # Garante que a variável exista, mas vazia
+            else:
+                # Caso contrário, mostra o campo de texto para uma única placa
+                placa_unica_input = st.text_input("🚗 Placa do Veículo (Opcional)", max_chars=10)
+                placas_input = "" # Garante que a variável exista, mas vazia
+
+            # --- ALTERADO: Lógica de cobrança e parcelas ---
+            opcoes_cobranca = ["Boleto", "Boleto a Vista", "Faturamento", "Cartão de Crédito", "Débito em Conta"]
+            
+            if st.session_state.is_frota:
+                tipo_cobranca_selecionado = "Faturamento"
+                qtd_parcelas_valor = 12
+                campos_parcelas_travados = True
+            # Usamos a chave 'select_cobranca' para ler o valor atual do widget
+            elif st.session_state.get('select_cobranca') == "Boleto a Vista":
+                tipo_cobranca_selecionado = "Boleto a Vista"
+                qtd_parcelas_valor = 1
+                campos_parcelas_travados = True
+            else:
+                tipo_cobranca_selecionado = st.session_state.get('select_cobranca', "Boleto")
+                qtd_parcelas_valor = 10 
+                campos_parcelas_travados = False
+
+            st.selectbox(
+                "Tipo de Cobrança*",
+                options=opcoes_cobranca,
+                index=opcoes_cobranca.index(tipo_cobranca_selecionado),
+                key="select_cobranca", # Chave para ler a seleção do usuário
+                disabled=st.session_state.is_frota
+            )
 
         st.subheader("Vigência e Parcelamento")
         col1, col2, col3 = st.columns(3)
@@ -272,7 +324,13 @@ def render_cadastro_form():
         with col2:
             dia_vencimento = st.number_input("Dia do Vencimento*", min_value=1, max_value=31, value=10)
         with col3:
-            quantidade_parcelas = st.number_input("Quantidade de Parcelas*", min_value=1, max_value=24, value=10)
+            quantidade_parcelas = st.number_input(
+                "Quantidade de Parcelas*",
+                min_value=1, max_value=24,
+                value=qtd_parcelas_valor,
+                disabled=campos_parcelas_travados,
+                key="qtd_parcelas"
+            )
 
         st.subheader("Valores e Comissão")
         col1, col2 = st.columns(2)
@@ -291,14 +349,70 @@ def render_cadastro_form():
         submitted = st.form_submit_button("💾 Salvar Apólice e Gerar Parcelas", use_container_width=True)
 
         if submitted:
+            if st.session_state.is_frota:
+                placa_final = ", ".join([p.strip() for p in placas_input.split('\n') if p.strip()])
+            else:
+                placa_final = placa_unica_input
+            
+            tipo_cobranca_final = st.session_state.select_cobranca
+
             valor_parcela = float(valor_parcela_str.replace(',', '.')) if valor_parcela_str else 0.0
             if valor_parcela <= 0:
                 st.error("O valor da parcela deve ser maior que zero.")
                 return
 
-            if not all([seguradora, cliente, numero_apolice, contato]):
+            if not all([seguradora, cliente, numero_apolice, contato, placa_final if st.session_state.is_frota else True]):
                 st.error("Por favor, preencha todos os campos obrigatórios (*).")
                 return
+
+            caminho_pdf_apolice_url = salvar_ficheiros_supabase(pdf_apolice_file, numero_apolice, cliente, 'apolices') if pdf_apolice_file else None
+            caminho_pdf_boletos_url = salvar_ficheiros_supabase(pdf_boletos_file, numero_apolice, cliente, 'boletos') if pdf_boletos_file else None
+
+            try:
+                with conn.session as s:
+                    apolice_data = {
+                        'seguradora': seguradora, 'cliente': cliente, 'numero_apolice': numero_apolice,
+                        'placa': placa_final, 'tipo_seguro': tipo_seguro, 'tipo_cobranca': tipo_cobranca_final,
+                        'valor_parcela': valor_parcela, 'comissao': comissao,
+                        'data_inicio_vigencia': data_inicio, 'quantidade_parcelas': quantidade_parcelas,
+                        'dia_vencimento': dia_vencimento, 'contato': contato, 'email': email,
+                        'observacoes': observacoes, 'status': 'Ativa',
+                        'caminho_pdf_apolice': caminho_pdf_apolice_url,
+                        'caminho_pdf_boletos': caminho_pdf_boletos_url
+                    }
+                    query_apolice = text('''
+                        INSERT INTO apolices (seguradora, cliente, numero_apolice, placa, tipo_seguro, tipo_cobranca, valor_parcela, comissao, data_inicio_vigencia, quantidade_parcelas, dia_vencimento, contato, email, observacoes, status, caminho_pdf_apolice, caminho_pdf_boletos)
+                        VALUES (:seguradora, :cliente, :numero_apolice, :placa, :tipo_seguro, :tipo_cobranca, :valor_parcela, :comissao, :data_inicio_vigencia, :quantidade_parcelas, :dia_vencimento, :contato, :email, :observacoes, :status, :caminho_pdf_apolice, :caminho_pdf_boletos)
+                        RETURNING id
+                    ''')
+                    apolice_id = s.execute(query_apolice, apolice_data).scalar_one()
+
+                    lista_parcelas_para_db = []
+                    data_base = data_inicio
+                    if dia_vencimento < data_inicio.day:
+                        data_base += relativedelta(months=1)
+
+                    for i in range(quantidade_parcelas):
+                        vencimento_calculado = date(data_base.year, data_base.month, dia_vencimento)
+                        lista_parcelas_para_db.append({
+                            "apolice_id": apolice_id, "numero_parcela": i + 1,
+                            "data_vencimento": vencimento_calculado, "valor": valor_parcela, "status": "Pendente"
+                        })
+                        data_base += relativedelta(months=1)
+
+                    if lista_parcelas_para_db:
+                        query_parcelas = text('INSERT INTO parcelas (apolice_id, numero_parcela, data_vencimento, valor, status) VALUES (:apolice_id, :numero_parcela, :data_vencimento, :valor, :status)')
+                        s.execute(query_parcelas, lista_parcelas_para_db)
+
+                    s.commit()
+                    add_historico(apolice_id, st.session_state.get('user_email', 'sistema'), 'Cadastro de Apólice', f"Apólice '{numero_apolice}' e {quantidade_parcelas} parcelas geradas.")
+                    st.success(f"🎉 Apólice '{numero_apolice}' e suas {quantidade_parcelas} parcelas foram salvas!")
+                    st.balloons()
+
+            except psycopg2.errors.UniqueViolation:
+                st.error(f"❌ Erro: O número de apólice '{numero_apolice}' já existe.")
+            except Exception as e:
+                st.error(f"❌ Ocorreu um erro inesperado ao salvar: {e}")
 
             # --- LÓGICA DE UPLOAD E BANCO DE DADOS ---
             caminho_pdf_apolice_url = salvar_ficheiros_supabase(pdf_apolice_file, numero_apolice, cliente, 'apolices') if pdf_apolice_file else None
