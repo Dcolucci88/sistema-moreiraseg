@@ -1,16 +1,15 @@
 # moreiraseg_sistema.py
-# VERSÃO COMPLETA E ATUALIZADA PARA SUPABASE STORAGE
+# VERSÃO REATORADA COM GESTÃO DE PARCELAS AUTOMATIZADA
 
 import streamlit as st
 import pandas as pd
 import datetime
-from datetime import date, timedelta
+from datetime import date
 import os
 import re
 
 # Tente importar as bibliotecas necessárias, mostrando erros amigáveis.
 try:
-    # NOVO: Importa a biblioteca do Supabase
     from supabase import create_client, Client
 except ImportError:
     st.error("Biblioteca do Supabase não encontrada. Verifique se 'supabase' está no seu `requirements.txt`.")
@@ -18,9 +17,10 @@ except ImportError:
 
 try:
     import psycopg2
-    from sqlalchemy import text 
+    from sqlalchemy import text
+    from dateutil.relativedelta import relativedelta # NOVO: Para cálculo de datas
 except ImportError:
-    st.error("Bibliotecas do banco de dados não encontradas. Adicione 'psycopg2-binary' e 'SQLAlchemy' ao seu `requirements.txt`.")
+    st.error("Bibliotecas essenciais não encontradas. Adicione 'psycopg2-binary', 'SQLAlchemy' e 'python-dateutil' ao seu `requirements.txt`.")
     st.stop()
 
 # --- CONFIGURAÇÕES GLOBAIS ---
@@ -28,7 +28,7 @@ ASSETS_DIR = "LogoTipo"
 LOGO_PATH = os.path.join(ASSETS_DIR, "logo_azul.png")
 ICONE_PATH = os.path.join(ASSETS_DIR, "Icone.png")
 
-# --- CONEXÃO COM O BANCO DE DADOS (MÉTODO MODERNO) ---
+# --- CONEXÃO COM O BANCO DE DADOS ---
 try:
     conn = st.connection("postgresql", type="sql")
 except Exception as e:
@@ -36,7 +36,7 @@ except Exception as e:
     st.info("Verifique se seu arquivo 'secrets.toml' está configurado corretamente com a URL de conexão do Supabase.")
     st.stop()
 
-# --- NOVO: CONEXÃO COM O SUPABASE STORAGE ---
+# --- CONEXÃO COM O SUPABASE STORAGE ---
 try:
     supabase_url = st.secrets["supabase"]["url"]
     supabase_key = st.secrets["supabase"]["service_key"]
@@ -46,47 +46,53 @@ except Exception as e:
     st.info("Verifique se seu arquivo 'secrets.toml' está configurado com a seção [supabase] e as chaves 'url' e 'service_key'.")
     st.stop()
 
-# --- FUNÇÕES DE BANCO DE DADOS (SEM ALTERAÇÕES) ---
-# ... (todas as suas funções de banco de dados como init_db, add_historico, etc., permanecem aqui sem alterações) ...
+# --- REATORADO: INICIALIZAÇÃO DO BANCO DE DADOS ---
 def init_db():
     """
-    Inicializa o banco de dados, cria e atualiza as tabelas conforme necessário.
+    Inicializa o banco de dados, criando e atualizando as tabelas para o novo modelo de parcelas.
     """
     try:
         with conn.session as s:
+            # Tabela de Apólices Simplificada
             s.execute(text('''
                 CREATE TABLE IF NOT EXISTS apolices (
                     id SERIAL PRIMARY KEY,
-                    seguradora TEXT NOT NULL, cliente TEXT NOT NULL, numero_apolice TEXT NOT NULL UNIQUE,
-                    placa TEXT, tipo_seguro TEXT NOT NULL,
-                    valor_da_parcela REAL NOT NULL,
-                    comissao REAL, data_inicio_de_vigencia DATE NOT NULL, data_final_de_vigencia DATE NOT NULL,
-                    contato TEXT NOT NULL, email TEXT, observacoes TEXT,
-                    status TEXT NOT NULL DEFAULT 'Ativa', caminho_pdf TEXT,
+                    seguradora TEXT NOT NULL,
+                    cliente TEXT NOT NULL,
+                    numero_apolice TEXT NOT NULL UNIQUE,
+                    placa TEXT,
+                    tipo_seguro TEXT NOT NULL,
+                    valor_parcela REAL NOT NULL,
+                    comissao REAL,
+                    data_inicio_vigencia DATE NOT NULL,
+                    quantidade_parcelas INTEGER NOT NULL,
+                    dia_vencimento INTEGER NOT NULL, -- Apenas o dia (ex: 10)
+                    contato TEXT NOT NULL,
+                    email TEXT,
+                    observacoes TEXT,
+                    status TEXT NOT NULL DEFAULT 'Ativa',
+                    caminho_pdf_apolice TEXT,
+                    caminho_pdf_boletos TEXT,
                     data_cadastro TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
                     data_atualizacao TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
                 )
             '''))
-            colunas_para_adicionar = {
-                "tipo_cobranca": "TEXT",
-                "numero_parcelas": "INTEGER",
-                "valor_primeira_parcela": "REAL"
-            }
-            for coluna, tipo in colunas_para_adicionar.items():
-                check_col_query = text("SELECT column_name FROM information_schema.columns WHERE table_name='apolices' AND column_name=:col")
-                if not s.execute(check_col_query, {"col": coluna}).fetchone():
-                    s.execute(text(f"ALTER TABLE apolices ADD COLUMN {coluna} {tipo}"))
 
+            # NOVA Tabela de Parcelas
             s.execute(text('''
-                CREATE TABLE IF NOT EXISTS boletos (
+                CREATE TABLE IF NOT EXISTS parcelas (
                     id SERIAL PRIMARY KEY,
                     apolice_id INTEGER NOT NULL,
-                    caminho_pdf TEXT NOT NULL,
-                    nome_arquivo TEXT,
-                    data_upload TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                    numero_parcela INTEGER NOT NULL,
+                    data_vencimento DATE NOT NULL,
+                    valor REAL NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'Pendente', -- Pendente, Paga, Atrasada
+                    data_pagamento DATE,
                     FOREIGN KEY (apolice_id) REFERENCES apolices(id) ON DELETE CASCADE
                 )
             '''))
+
+            # Tabela de Histórico (sem alterações)
             s.execute(text('''
                 CREATE TABLE IF NOT EXISTS historico (
                     id SERIAL PRIMARY KEY,
@@ -98,6 +104,8 @@ def init_db():
                     FOREIGN KEY (apolice_id) REFERENCES apolices(id) ON DELETE CASCADE
                 )
             '''))
+
+            # Tabela de Usuários (sem alterações)
             s.execute(text('''
                 CREATE TABLE IF NOT EXISTS usuarios (
                     id SERIAL PRIMARY KEY,
@@ -108,7 +116,8 @@ def init_db():
                     data_cadastro TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
                 )
             '''))
-            
+
+            # Cria usuário admin padrão se não existir
             user_exists = s.execute(text("SELECT id FROM usuarios WHERE email = :email"), {'email': 'adm@moreiraseg.com.br'}).fetchone()
             if not user_exists:
                 s.execute(
@@ -117,52 +126,11 @@ def init_db():
                 )
             s.commit()
     except Exception as e:
-        st.error(f"❌ Falha ao inicializar as tabelas do banco de dados: {e}")
+        st.error(f"❌ Falha grave ao inicializar as tabelas do banco de dados: {e}")
         st.stop()
 
+# --- FUNÇÕES DE LÓGICA DO SISTEMA (ATUALIZADAS) ---
 
-# --- ATUALIZADO: FUNÇÃO DE UPLOAD PARA O SUPABASE ---
-def salvar_ficheiros_supabase(ficheiros, numero_apolice, cliente, tipo_pasta):
-    if not isinstance(ficheiros, list):
-        ficheiros = [ficheiros]
-    urls_publicas = []
-    
-    try:
-        # Pega o nome do bucket correto do secrets.toml
-        bucket_name = st.secrets["buckets"][tipo_pasta]
-        
-        safe_cliente = re.sub(r'[^a-zA-Z0-9\s-]', '', cliente).strip().replace(' ', '_')
-
-        for ficheiro in ficheiros:
-            # Lê os bytes do arquivo para upload
-            file_bytes = ficheiro.getvalue()
-            
-            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            # O Supabase usa a pasta como parte do caminho do arquivo
-            destination_path = f"{tipo_pasta}/{safe_cliente}/{numero_apolice}/{timestamp}_{ficheiro.name}"
-            
-            # Faz o upload usando o cliente Supabase
-            supabase.storage.from_(bucket_name).upload(
-                path=destination_path,
-                file=file_bytes,
-                file_options={"content-type": ficheiro.type}
-            )
-            
-            # Obtém a URL pública do arquivo recém-enviado
-            public_url = supabase.storage.from_(bucket_name).get_public_url(destination_path)
-            urls_publicas.append(public_url)
-            
-        return urls_publicas
-
-    except KeyError as e:
-        st.error(f"Erro de chave nos 'Secrets': A chave '{e}' não foi encontrada na seção [buckets] ou [supabase].")
-        return []
-    except Exception as e:
-        st.error(f"❌ Falha no upload para o Supabase Storage: {e}")
-        return []
-
-# --- FUNÇÕES DE LÓGICA DO SISTEMA (ATUALIZADAS PARA USAR A NOVA FUNÇÃO DE UPLOAD) ---
-# ... (a maioria das funções permanece igual, apenas as chamadas para upload são atualizadas) ...
 def add_historico(apolice_id, usuario_email, acao, detalhes=""):
     try:
         with conn.session as s:
@@ -174,397 +142,230 @@ def add_historico(apolice_id, usuario_email, acao, detalhes=""):
     except Exception as e:
         st.warning(f"⚠️ Não foi possível registrar a ação no histórico: {e}")
 
-def add_boletos_db(apolice_id, boletos_info):
+def salvar_ficheiros_supabase(ficheiro, numero_apolice, cliente, tipo_pasta):
+    """Salva um único ficheiro no Supabase Storage."""
     try:
-        with conn.session as s:
-            for url, nome in boletos_info:
-                s.execute(
-                    text('INSERT INTO boletos (apolice_id, caminho_pdf, nome_arquivo) VALUES (:apolice_id, :caminho_pdf, :nome_arquivo)'),
-                    {'apolice_id': apolice_id, 'caminho_pdf': url, 'nome_arquivo': nome}
-                )
-            s.commit()
-    except Exception as e:
-        st.error(f"❌ Erro ao salvar informações dos boletos no banco de dados: {e}")
+        bucket_name = st.secrets["buckets"][tipo_pasta]
+        safe_cliente = re.sub(r'[^a-zA-Z0-9\s-]', '', cliente).strip().replace(' ', '_')
+        file_bytes = ficheiro.getvalue()
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        destination_path = f"{safe_cliente}/{numero_apolice}/{timestamp}_{ficheiro.name}"
 
-def add_apolice(data):
-    if data['data_inicio_de_vigencia'] >= data['data_final_de_vigencia']:
-        st.error("❌ A data final da vigência deve ser posterior à data inicial.")
-        return None
-    try:
-        data['valor_da_parcela'] = float(str(data['valor_da_parcela']).replace(',', '.'))
-        if data.get('valor_primeira_parcela'):
-            data['valor_primeira_parcela'] = float(str(data['valor_primeira_parcela']).replace(',', '.'))
-        if data.get('comissao'):
-            data['comissao'] = float(data['comissao'])
-    except (ValueError, TypeError):
-        st.error("❌ Valores numéricos inválidos. Use apenas números e vírgula.")
-        return None
-
-    try:
-        with conn.session as s:
-            query = text('''
-                INSERT INTO apolices (
-                    seguradora, cliente, numero_apolice, placa, tipo_seguro, tipo_cobranca,
-                    numero_parcelas, valor_primeira_parcela, valor_da_parcela, comissao,
-                    data_inicio_de_vigencia, data_final_de_vigencia, contato, email,
-                    observacoes, status, caminho_pdf
-                ) VALUES (
-                    :seguradora, :cliente, :numero_apolice, :placa, :tipo_seguro, :tipo_cobranca,
-                    :numero_parcelas, :valor_primeira_parcela, :valor_da_parcela, :comissao,
-                    :data_inicio_de_vigencia, :data_final_de_vigencia, :contato, :email,
-                    :observacoes, :status, :caminho_pdf
-                )
-                RETURNING id
-            ''')
-            apolice_id = s.execute(query, data).scalar_one()
-            s.commit()
-
-        add_historico(
-            apolice_id,
-            st.session_state.get('user_email', 'sistema'),
-            'Cadastro de Apólice',
-            f"Apólice '{data['numero_apolice']}' criada."
+        supabase.storage.from_(bucket_name).upload(
+            path=destination_path,
+            file=file_bytes,
+            file_options={"content-type": ficheiro.type}
         )
-        return apolice_id
-    except psycopg2.errors.UniqueViolation:
-        st.error(f"❌ Erro: O número de apólice '{data['numero_apolice']}' já existe no sistema!")
+        public_url = supabase.storage.from_(bucket_name).get_public_url(destination_path)
+        return public_url
+    except KeyError as e:
+        st.error(f"Erro de chave nos 'Secrets': A chave '{e}' não foi encontrada.")
         return None
     except Exception as e:
-        st.error(f"❌ Ocorreu um erro inesperado ao cadastrar: {e}")
+        st.error(f"❌ Falha no upload para o Supabase Storage: {e}")
         return None
 
-def update_apolice(apolice_id, update_data):
-    try:
-        with conn.session as s:
-            update_data['data_atualizacao'] = datetime.datetime.now(datetime.timezone.utc)
-            set_clause = ", ".join([f"{key} = :{key}" for key in update_data.keys()])
-            query = text(f"UPDATE apolices SET {set_clause} WHERE id = :apolice_id")
-            
-            params = update_data.copy()
-            params['apolice_id'] = apolice_id
-            
-            s.execute(query, params)
-            s.commit()
-
-        detalhes = f"Campos atualizados: {', '.join(update_data.keys())}"
-        add_historico(apolice_id, st.session_state.get('user_email', 'sistema'), 'Atualização', detalhes)
-        return True
-    except Exception as e:
-        st.error(f"❌ Erro ao atualizar a apólice: {e}")
-        return False
-
-def delete_apolice(apolice_id):
-    try:
-        with conn.session as s:
-            s.execute(text('DELETE FROM apolices WHERE id = :id'), {'id': apolice_id})
-            s.commit()
-        return True
-    except Exception as e:
-        st.error(f"❌ Erro ao apagar a apólice: {e}")
-        return False
-
-# ... (o restante das suas funções get_apolices, get_apolice_details, login_user, etc. permanecem iguais) ...
 def get_apolices(search_term=None):
+    """Busca apólices no banco de dados."""
     try:
         query = "SELECT * FROM apolices"
         params = {}
         if search_term:
             query += " WHERE numero_apolice ILIKE :term OR cliente ILIKE :term OR placa ILIKE :term"
             params['term'] = f"%{search_term}%"
-        query += " ORDER BY data_final_de_vigencia ASC"
-        
+        query += " ORDER BY data_cadastro DESC"
         df = conn.query(query, params=params, ttl=60)
+        return df
     except Exception as e:
         st.error(f"Erro ao carregar apólices: {e}")
         return pd.DataFrame()
 
-    if not df.empty:
-        df['data_final_de_vigencia'] = pd.to_datetime(df['data_final_de_vigencia'], errors='coerce')
-        today = pd.to_datetime(date.today())
-        df['dias_restantes'] = (df['data_final_de_vigencia'] - today).dt.days
-
-        def define_prioridade(dias):
-            if pd.isna(dias): return '⚪ Indefinida'
-            if dias <= 15: return '🔥 Urgente'
-            elif dias <= 30: return '⚠️ Alta'
-            elif dias <= 60: return '⚠️ Média'
-            else: return '✅ Baixa'
-        df['prioridade'] = df['dias_restantes'].apply(define_prioridade)
-        
-        df.loc[df['dias_restantes'] <= 30, 'status'] = 'Pendente'
-    return df
-
-def get_apolice_details(apolice_id):
+def get_parcelas_da_apolice(apolice_id):
+    """Busca todas as parcelas de uma apólice específica."""
     try:
-        apolice_df = conn.query("SELECT * FROM apolices WHERE id = :id", params={'id': apolice_id}, ttl=10)
-        historico_df = conn.query("SELECT * FROM historico WHERE apolice_id = :id ORDER BY data_acao DESC", params={'id': apolice_id}, ttl=10)
-        
-        apolice = apolice_df.to_dict('records')[0] if not apolice_df.empty else None
-        historico = historico_df.to_dict('records') if not historico_df.empty else []
-        
-        return apolice, historico
+        query = "SELECT * FROM parcelas WHERE apolice_id = :apolice_id ORDER BY numero_parcela ASC"
+        df = conn.query(query, params={'apolice_id': apolice_id}, ttl=10)
+        return df
     except Exception as e:
-        st.error(f"Erro ao buscar detalhes da apólice: {e}")
-        return None, []
+        st.error(f"Erro ao carregar as parcelas: {e}")
+        return pd.DataFrame()
 
-def login_user(email, senha):
-    try:
-        user_df = conn.query("SELECT * FROM usuarios WHERE email = :email AND senha = :senha", params={'email': email, 'senha': senha}, ttl=10)
-        if not user_df.empty:
-            return user_df.to_dict('records')[0]
-        return None
-    except Exception as e:
-        st.error(f"Erro durante o login: {e}")
-        return None
-
-
-# --- RENDERIZAÇÃO DA INTERFACE (com as chamadas de função de upload atualizadas) ---
-def render_dashboard():
-    st.title("📊 Painel de Controle")
-    apolices_df = get_apolices()
-    if apolices_df.empty:
-        st.info("Nenhuma apólice cadastrada. Comece adicionando uma no menu 'Cadastrar Apólice'.")
-        return
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Total de Apólices", len(apolices_df))
-    pendentes_df = apolices_df[apolices_df['status'] == 'Pendente']
-    col2.metric("Apólices Pendentes", len(pendentes_df))
-    valor_pendente = pendentes_df['valor_da_parcela'].sum()
-    col3.metric("Valor Total Pendente", f"R${valor_pendente:,.2f}")
-    urgentes_df = apolices_df[apolices_df['dias_restantes'].fillna(999) <= 15]
-    col4.metric("Apólices Urgentes", len(urgentes_df), "Vencem em até 15 dias")
-    st.divider()
-    st.subheader("Apólices por Prioridade de Renovação")
-    prioridades_map = {
-        '🔥 Urgente': apolices_df[apolices_df['prioridade'] == '🔥 Urgente'],
-        '⚠️ Alta': apolices_df[apolices_df['prioridade'] == '⚠️ Alta'],
-        '⚠️ Média': apolices_df[apolices_df['prioridade'] == '⚠️ Média'],
-        '✅ Baixa': apolices_df[apolices_df['prioridade'] == '✅ Baixa'],
-        '⚪ Indefinida': apolices_df[apolices_df['prioridade'] == '⚪ Indefinida']
-    }
-    tabs = st.tabs(prioridades_map.keys())
-    cols_to_show = ['cliente', 'numero_apolice', 'tipo_seguro', 'dias_restantes', 'status']
-    for tab, (prioridade, df) in zip(tabs, prioridades_map.items()):
-        with tab:
-            if not df.empty:
-                st.dataframe(df[cols_to_show], use_container_width=True)
-            else:
-                st.info(f"Nenhuma apólice com prioridade '{prioridade.split(' ')[-1]}'.")
-
-def render_pesquisa_e_edicao():
-    st.title("🔍 Pesquisar e Editar Apólice")
-    search_term = st.text_input("Pesquisar por Nº Apólice, Cliente ou Placa:", key="search_box")
-    if search_term:
-        resultados = get_apolices(search_term=search_term)
-        if resultados.empty:
-            st.info("Nenhuma apólice encontrada com o termo pesquisado.")
-        else:
-            st.success(f"{len(resultados)} apólice(s) encontrada(s).")
-            for index, apolice_row in resultados.iterrows():
-                with st.expander(f"**{apolice_row['numero_apolice']}** - {apolice_row['cliente']}"):
-                    apolice_id = apolice_row['id']
-                    st.subheader("📝 Editar Informações da Apólice")
-                    with st.form(f"edit_form_{apolice_id}"):
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            novo_valor_parcelas = st.text_input("Valor das Demais Parcelas (R$)", value=f"{apolice_row.get('valor_da_parcela', 0.0):.2f}", key=f"valor_{apolice_id}")
-                            novo_contato = st.text_input("Contato do Cliente", value=apolice_row.get('contato', ''), key=f"contato_{apolice_id}")
-                            data_inicio_atual = apolice_row.get('data_inicio_de_vigencia')
-                            if pd.isna(data_inicio_atual): data_inicio_atual = date.today()
-                            nova_data_inicio = st.date_input("📅 Início de Vigência", value=data_inicio_atual, format="DD/MM/YYYY", key=f"data_inicio_{apolice_id}")
-                        with col2:
-                            novo_num_parcelas = st.number_input("Nº de Parcelas", min_value=1, max_value=12, value=int(apolice_row.get('numero_parcelas', 1)), key=f"parcelas_{apolice_id}")
-                            novo_email = st.text_input("E-mail do Cliente", value=apolice_row.get('email', ''), key=f"email_{apolice_id}")
-                            data_fim_atual = apolice_row.get('data_final_de_vigencia')
-                            if pd.isna(data_fim_atual): data_fim_atual = date.today()
-                            nova_data_fim = st.date_input("📅 Fim de Vigência", value=data_fim_atual, format="DD/MM/YYYY", key=f"data_fim_{apolice_id}")
-                        edit_submitted = st.form_submit_button("Salvar Alterações")
-                        if edit_submitted:
-                            update_data = {
-                                'valor_da_parcela': float(novo_valor_parcelas.replace(',', '.')),
-                                'numero_parcelas': novo_num_parcelas,
-                                'contato': novo_contato,
-                                'email': novo_email,
-                                'data_inicio_de_vigencia': nova_data_inicio,
-                                'data_final_de_vigencia': nova_data_fim
-                            }
-                            if update_apolice(apolice_id, update_data):
-                                st.success("Informações da apólice atualizadas com sucesso!")
-                                st.rerun()
-                    st.divider()
-                    st.subheader("📁 Gerenciar Anexos")
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        with st.form(f"apolice_upload_form_{apolice_id}"):
-                            st.write("**Atualizar Apólice (PDF)**")
-                            apolice_pdf_file = st.file_uploader("Selecione a nova versão da apólice", type=["pdf"], key=f"apolice_pdf_{apolice_id}")
-                            apolice_upload_submitted = st.form_submit_button("Substituir PDF da Apólice")
-                            if apolice_upload_submitted and apolice_pdf_file:
-                                st.info("Fazendo upload da nova apólice...")
-                                # ATUALIZADO
-                                novo_caminho = salvar_ficheiros_supabase([apolice_pdf_file], apolice_row['numero_apolice'], apolice_row['cliente'], 'apolices')
-                                if novo_caminho:
-                                    if update_apolice(apolice_id, {'caminho_pdf': novo_caminho[0]}):
-                                        st.success("PDF da apólice substituído com sucesso!")
-                                        st.rerun()
-                    with col2:
-                        with st.form(f"boleto_upload_form_{apolice_id}"):
-                            st.write("**Anexar Novo Boleto**")
-                            boleto_pdf_file = st.file_uploader("Selecione o novo boleto", type=["pdf"], key=f"boleto_pdf_{apolice_id}")
-                            boleto_upload_submitted = st.form_submit_button("Anexar Boleto")
-                            if boleto_upload_submitted and boleto_pdf_file:
-                                st.info("Fazendo upload do boleto...")
-                                # ATUALIZADO
-                                novo_caminho_boleto = salvar_ficheiros_supabase([boleto_pdf_file], apolice_row['numero_apolice'], apolice_row['cliente'], 'boletos')
-                                if novo_caminho_boleto:
-                                    add_boletos_db(apolice_id, [(novo_caminho_boleto[0], boleto_pdf_file.name)])
-                                    st.success("Novo boleto anexado com sucesso!")
-                                    st.rerun()
-                    st.divider()
-                    st.subheader("Zona de Perigo")
-                    with st.form(f"delete_form_{apolice_id}"):
-                        st.warning("Atenção: Apagar uma apólice é uma ação permanente e não pode ser desfeita.")
-                        delete_submitted = st.form_submit_button("🗑️ Apagar Apólice Permanentemente")
-                        if delete_submitted:
-                            if delete_apolice(apolice_id):
-                                st.success("Apólice apagada com sucesso!")
-                                st.rerun()
+# --- RENDERIZAÇÃO DA INTERFACE ---
 
 def render_cadastro_form():
+    """Renderiza o formulário de cadastro com a nova lógica de parcelas."""
     st.title("➕ Cadastrar Nova Apólice")
-    with st.form("form_cadastro", clear_on_submit=True):
+    with st.form("form_cadastro", clear_on_submit=False):
         st.subheader("Dados da Apólice")
         col1, col2 = st.columns(2)
         with col1:
             seguradora = st.text_input("Seguradora*", max_chars=50)
             numero_apolice = st.text_input("Número da Apólice*", max_chars=50)
             tipo_seguro = st.selectbox("Tipo de Seguro*", ["Automóvel", "RCO", "Vida", "Residencial", "Empresarial", "Saúde", "Viagem", "Fiança", "Outro"])
-            data_inicio = st.date_input("📅 Início de Vigência*", format="DD/MM/YYYY")
         with col2:
             cliente = st.text_input("Cliente*", max_chars=100)
             placa = st.text_input("🚗 Placa do Veículo (Obrigatório para Auto/RCO)", max_chars=10)
             tipo_cobranca = st.selectbox("Tipo de Cobrança*", ["Boleto", "Faturamento", "Cartão de Crédito", "Débito em Conta"])
-            data_fim_calculada = data_inicio + timedelta(days=365)
-            st.date_input("📅 Fim de Vigência (Automático)", value=data_fim_calculada, format="DD/MM/YYYY", disabled=True)
-        
-        st.subheader("Valores e Comissão")
-        col1, col2, col3, col4 = st.columns(4)
+
+        st.subheader("Vigência e Parcelamento")
+        col1, col2, col3 = st.columns(3)
         with col1:
-            valor_primeira_parcela = st.text_input("💰 Valor da 1ª Parcela (R$)", value="0,00")
+            data_inicio = st.date_input("📅 Início de Vigência*")
         with col2:
-            valor_demais_parcelas = st.text_input("💰 Valor das Demais Parcelas (R$)*", value="0,00")
+            # NOVO: Apenas o dia do vencimento
+            dia_vencimento = st.number_input("Dia do Vencimento*", min_value=1, max_value=31, value=10)
         with col3:
-            numero_parcelas = st.selectbox("Nº de Parcelas", options=list(range(1, 13)), index=0)
-        with col4:
+            # NOVO: Quantidade de parcelas
+            quantidade_parcelas = st.number_input("Quantidade de Parcelas*", min_value=1, max_value=24, value=10)
+
+        st.subheader("Valores e Comissão")
+        col1, col2 = st.columns(2)
+        with col1:
+            valor_parcela = st.text_input("💰 Valor de Cada Parcela (R$)*", value="0,00")
+        with col2:
             comissao = st.number_input("💼 Comissão (%)", min_value=0.0, max_value=100.0, value=10.0, step=0.5, format="%.2f")
-        st.subheader("Dados de Contato e Outros")
+
+        st.subheader("Dados de Contato e Anexos")
         contato = st.text_input("📱 Contato do Cliente*", max_chars=100)
         email = st.text_input("📧 E-mail do Cliente", max_chars=100)
         observacoes = st.text_area("📝 Observações", height=100)
-        st.subheader("Anexos")
-        pdf_file = st.file_uploader("📎 Anexar PDF da Apólice (Opcional)", type=["pdf"])
-        boletos_files = st.file_uploader("📎 Anexar Boletos (Opcional)", type=["pdf"], accept_multiple_files=True)
-        submitted = st.form_submit_button("💾 Salvar Apólice", use_container_width=True)
+        pdf_apolice = st.file_uploader("📎 Anexar PDF da Apólice (Opcional)", type=["pdf"])
+        pdf_boletos = st.file_uploader("📎 Anexar Carnê de Boletos (PDF único, opcional)", type=["pdf"])
+
+        submitted = st.form_submit_button("💾 Salvar Apólice e Gerar Parcelas", use_container_width=True)
+
         if submitted:
+            # --- VALIDAÇÃO DOS CAMPOS ---
             campos_obrigatorios = {
                 "Seguradora": seguradora, "Cliente": cliente, "Número da Apólice": numero_apolice,
-                "Valor das Demais Parcelas": valor_demais_parcelas, "Contato": contato
+                "Contato": contato, "Valor de Cada Parcela": valor_parcela
             }
-            campos_vazios = [nome for nome, valor in campos_obrigatorios.items() if not valor]
-            if tipo_seguro in ["Automóvel", "RCO"] and not placa:
-                campos_vazios.append("Placa (obrigatória para Auto/RCO)")
-            if campos_vazios:
-                st.error(f"Por favor, preencha os seguintes campos obrigatórios: {', '.join(campos_vazios)}")
+            if float(valor_parcela.replace(',', '.')) <= 0:
+                st.error("O valor da parcela deve ser maior que zero.")
                 return
-            caminho_pdf_apolice = None
-            if pdf_file:
+
+            if any(not v for v in campos_obrigatorios.values()):
+                st.error(f"Preencha todos os campos obrigatórios: {', '.join(k for k, v in campos_obrigatorios.items() if not v)}")
+                return
+
+            # --- LÓGICA DE UPLOAD ---
+            caminho_pdf_apolice_url = None
+            if pdf_apolice:
                 st.info("Fazendo upload do PDF da apólice...")
-                # ATUALIZADO
-                urls = salvar_ficheiros_supabase([pdf_file], numero_apolice, cliente, 'apolices')
-                if urls:
-                    caminho_pdf_apolice = urls[0]
-                else:
-                    st.error("Falha no upload do PDF da apólice.")
+                caminho_pdf_apolice_url = salvar_ficheiros_supabase(pdf_apolice, numero_apolice, cliente, 'apolices')
+                if not caminho_pdf_apolice_url:
+                    st.error("Falha no upload do PDF da apólice. O cadastro foi cancelado.")
                     return
-            
-            data_fim = data_inicio + timedelta(days=365)
-            
-            apolice_data = {
-                'seguradora': seguradora, 'cliente': cliente, 'numero_apolice': numero_apolice,
-                'placa': placa, 'tipo_seguro': tipo_seguro, 'tipo_cobranca': tipo_cobranca,
-                'numero_parcelas': int(numero_parcelas), 'valor_primeira_parcela': valor_primeira_parcela,
-                'valor_da_parcela': valor_demais_parcelas, 'comissao': comissao,
-                'data_inicio_de_vigencia': data_inicio, 'data_final_de_vigencia': data_fim,
-                'contato': contato, 'email': email, 'observacoes': observacoes,
-                'status': 'Ativa', 'caminho_pdf': caminho_pdf_apolice if caminho_pdf_apolice else ""
-            }
-            apolice_id = add_apolice(apolice_data)
-            if apolice_id:
-                st.success(f"🎉 Apólice '{numero_apolice}' cadastrada com sucesso!")
-                if caminho_pdf_apolice:
-                    st.success("PDF da apólice salvo na nuvem!")
-                if boletos_files:
-                    st.info("Fazendo upload dos boletos...")
-                    # ATUALIZADO
-                    urls_boletos = salvar_ficheiros_supabase(boletos_files, numero_apolice, cliente, 'boletos')
-                    if urls_boletos:
-                        boletos_info = list(zip(urls_boletos, [f.name for f in boletos_files]))
-                        add_boletos_db(apolice_id, boletos_info)
-                        st.success(f"{len(urls_boletos)} boleto(s) salvo(s) na nuvem com sucesso!")
-                    else:
-                        st.warning("A apólice foi salva, mas ocorreu uma falha no upload dos boletos.")
-                st.balloons()
-            else:
-                st.error("Falha ao salvar a apólice no banco de dados.")
 
-def render_configuracoes():
-    st.title("⚙️ Configurações do Sistema")
-    tab1, tab2 = st.tabs(["Gerenciar Usuários", "Backup e Restauração"])
-    with tab1:
-        st.subheader("Usuários Cadastrados")
-        try:
-            usuarios_df = conn.query("SELECT id, nome, email, perfil, data_cadastro FROM usuarios", ttl=10)
-            st.dataframe(usuarios_df, use_container_width=True)
-        except Exception as e:
-            st.error(f"Erro ao listar usuários: {e}")
-        
-        with st.expander("Adicionar Novo Usuário"):
-            with st.form("form_novo_usuario", clear_on_submit=True):
-                nome = st.text_input("Nome Completo")
-                email = st.text_input("E-mail")
-                senha = st.text_input("Senha", type="password")
-                perfil = st.selectbox("Perfil", ["user", "admin"])
-                if st.form_submit_button("Adicionar Usuário"):
-                    if not all([nome, email, senha, perfil]):
-                        st.warning("Todos os campos são obrigatórios.")
-                    else:
-                        try:
-                            with conn.session as s:
-                                s.execute(
-                                    text("INSERT INTO usuarios (nome, email, senha, perfil) VALUES (:nome, :email, :senha, :perfil)"),
-                                    {'nome': nome, 'email': email, 'senha': senha, 'perfil': perfil}
-                                )
-                                s.commit()
-                            st.success(f"Usuário '{nome}' adicionado com sucesso!")
-                            st.rerun()
-                        except psycopg2.errors.UniqueViolation:
-                            st.error(f"Erro: O e-mail '{email}' já está cadastrado.")
-                        except Exception as e:
-                            st.error(f"Erro ao adicionar usuário: {e}")
-    with tab2:
-        st.subheader("Backup de Dados (Exportar)")
-        all_data_df = conn.query("SELECT * FROM apolices", ttl=10)
-        if not all_data_df.empty:
-            csv_data = all_data_df.to_csv(index=False).encode('utf-8')
-            st.download_button(
-                label="📥 Exportar Backup Completo (CSV)",
-                data=csv_data,
-                file_name=f"backup_completo_apolices_{date.today()}.csv",
-                mime="text/csv"
-            )
-        else:
-            st.info("Nenhuma apólice para exportar.")
+            caminho_pdf_boletos_url = None
+            if pdf_boletos:
+                st.info("Fazendo upload do carnê de boletos...")
+                caminho_pdf_boletos_url = salvar_ficheiros_supabase(pdf_boletos, numero_apolice, cliente, 'boletos')
+                if not caminho_pdf_boletos_url:
+                    st.error("Falha no upload do carnê de boletos. O cadastro foi cancelado.")
+                    return
 
+            # --- LÓGICA DE BANCO DE DADOS (TRANSAÇÃO) ---
+            try:
+                with conn.session as s:
+                    # 1. INSERE A APÓLICE PRINCIPAL
+                    apolice_data = {
+                        'seguradora': seguradora, 'cliente': cliente, 'numero_apolice': numero_apolice,
+                        'placa': placa, 'tipo_seguro': tipo_seguro,
+                        'valor_parcela': float(valor_parcela.replace(',', '.')), 'comissao': comissao,
+                        'data_inicio_vigencia': data_inicio, 'quantidade_parcelas': quantidade_parcelas,
+                        'dia_vencimento': dia_vencimento, 'contato': contato, 'email': email,
+                        'observacoes': observacoes, 'status': 'Ativa',
+                        'caminho_pdf_apolice': caminho_pdf_apolice_url,
+                        'caminho_pdf_boletos': caminho_pdf_boletos_url
+                    }
+                    query_apolice = text('''
+                        INSERT INTO apolices (seguradora, cliente, numero_apolice, placa, tipo_seguro, valor_parcela, comissao, data_inicio_vigencia, quantidade_parcelas, dia_vencimento, contato, email, observacoes, status, caminho_pdf_apolice, caminho_pdf_boletos)
+                        VALUES (:seguradora, :cliente, :numero_apolice, :placa, :tipo_seguro, :valor_parcela, :comissao, :data_inicio_vigencia, :quantidade_parcelas, :dia_vencimento, :contato, :email, :observacoes, :status, :caminho_pdf_apolice, :caminho_pdf_boletos)
+                        RETURNING id
+                    ''')
+                    apolice_id = s.execute(query_apolice, apolice_data).scalar_one()
+
+                    # 2. CALCULA E GERA AS PARCELAS
+                    lista_parcelas_para_db = []
+                    data_base = data_inicio
+                    # Se o dia de vencimento for menor que o dia de início, a primeira parcela é no mês seguinte.
+                    if dia_vencimento < data_inicio.day:
+                        data_base += relativedelta(months=1)
+
+                    for i in range(quantidade_parcelas):
+                        # Constrói a data de vencimento para o mês corrente do cálculo
+                        vencimento_calculado = date(data_base.year, data_base.month, dia_vencimento)
+                        parcela = {
+                            "apolice_id": apolice_id,
+                            "numero_parcela": i + 1,
+                            "data_vencimento": vencimento_calculado,
+                            "valor": float(valor_parcela.replace(',', '.')),
+                            "status": "Pendente"
+                        }
+                        lista_parcelas_para_db.append(parcela)
+                        # Avança um mês para a próxima iteração
+                        data_base += relativedelta(months=1)
+
+                    # 3. INSERE TODAS AS PARCELAS DE UMA VEZ
+                    if lista_parcelas_para_db:
+                        query_parcelas = text('''
+                            INSERT INTO parcelas (apolice_id, numero_parcela, data_vencimento, valor, status)
+                            VALUES (:apolice_id, :numero_parcela, :data_vencimento, :valor, :status)
+                        ''')
+                        s.execute(query_parcelas, lista_parcelas_para_db)
+
+                    s.commit() # Confirma a transação
+                    add_historico(apolice_id, st.session_state.get('user_email', 'sistema'), 'Cadastro de Apólice', f"Apólice '{numero_apolice}' e {quantidade_parcelas} parcelas geradas.")
+                    st.success(f"🎉 Apólice '{numero_apolice}' e suas {quantidade_parcelas} parcelas foram salvas com sucesso!")
+                    st.balloons()
+
+            except psycopg2.errors.UniqueViolation:
+                st.error(f"❌ Erro: O número de apólice '{numero_apolice}' já existe no sistema!")
+            except Exception as e:
+                st.error(f"❌ Ocorreu um erro inesperado ao salvar no banco de dados: {e}")
+
+
+def render_pesquisa_e_edicao():
+    st.title("🔍 Pesquisar e Visualizar Apólices")
+    search_term = st.text_input("Pesquisar por Nº Apólice, Cliente ou Placa:", key="search_box")
+    resultados = get_apolices(search_term=search_term)
+
+    if resultados.empty and search_term:
+        st.info("Nenhuma apólice encontrada com o termo pesquisado.")
+    elif not resultados.empty:
+        st.success(f"{len(resultados)} apólice(s) encontrada(s).")
+        for index, apolice_row in resultados.iterrows():
+            with st.expander(f"**{apolice_row['numero_apolice']}** - {apolice_row['cliente']}"):
+                apolice_id = apolice_row['id']
+                st.subheader("Detalhes da Apólice")
+                col1, col2, col3 = st.columns(3)
+                col1.metric("Valor da Parcela", f"R$ {apolice_row.get('valor_parcela', 0.0):,.2f}")
+                col2.metric("Quantidade de Parcelas", apolice_row.get('quantidade_parcelas', 0))
+                col3.metric("Dia do Vencimento", f"Todo dia {apolice_row.get('dia_vencimento', 0)}")
+                
+                # Links para os PDFs
+                if apolice_row.get('caminho_pdf_apolice'):
+                    st.link_button("Ver PDF da Apólice", apolice_row['caminho_pdf_apolice'])
+                if apolice_row.get('caminho_pdf_boletos'):
+                    st.link_button("Ver Carnê de Boletos", apolice_row['caminho_pdf_boletos'])
+
+                st.divider()
+                st.subheader("Situação das Parcelas")
+                parcelas_df = get_parcelas_da_apolice(apolice_id)
+
+                if not parcelas_df.empty:
+                    # Formatação para exibição
+                    parcelas_df['data_vencimento'] = pd.to_datetime(parcelas_df['data_vencimento']).dt.strftime('%d/%m/%Y')
+                    parcelas_df['valor'] = parcelas_df['valor'].apply(lambda x: f"R$ {x:,.2f}")
+                    st.dataframe(parcelas_df[['numero_parcela', 'data_vencimento', 'valor', 'status']], use_container_width=True)
+                else:
+                    st.warning("Nenhuma parcela encontrada para esta apólice.")
+                
+                # Adicionar lógica de edição aqui se necessário no futuro
+
+
+# --- FUNÇÃO PRINCIPAL E ROTEAMENTO ---
 def main():
     st.set_page_config(
         page_title="Moreiraseg - Gestão de Apólices",
@@ -580,8 +381,9 @@ def main():
             st.session_state.user_email = None
             st.session_state.user_nome = None
             st.session_state.user_perfil = None
-        
+
         if not st.session_state.user_email:
+            # Layout da tela de login centralizada
             col1, col2, col3 = st.columns([1, 1.5, 1])
             with col2:
                 try:
@@ -594,8 +396,13 @@ def main():
                     senha = st.text_input("🔑 Senha", type="password")
                     submit = st.form_submit_button("Entrar", use_container_width=True)
                     if submit:
-                        usuario = login_user(email, senha)
-                        if usuario:
+                        # A função login_user precisa ser definida ou adaptada
+                        # Por enquanto, usando um login simples para demonstração
+                        with conn.session as s:
+                            user_query = text("SELECT * FROM usuarios WHERE email = :email AND senha = :senha")
+                            user_df = pd.read_sql(user_query, s, params={'email': email, 'senha': senha})
+                        if not user_df.empty:
+                            usuario = user_df.to_dict('records')[0]
                             st.session_state.user_email = usuario['email']
                             st.session_state.user_nome = usuario['nome']
                             st.session_state.user_perfil = usuario['perfil']
@@ -607,18 +414,15 @@ def main():
         with st.sidebar:
             st.title(f"Olá, {st.session_state.user_nome.split()[0]}!")
             st.write(f"Perfil: `{st.session_state.user_perfil.capitalize()}`")
-            try:
-                st.image(ICONE_PATH, width=80)
-            except Exception:
-                st.write("Menu")
             st.divider()
             menu_options = [
-                "📊 Painel de Controle",
+                # "📊 Painel de Controle", # Desabilitado por enquanto
                 "➕ Cadastrar Apólice",
-                "🔍 Pesquisar e Editar Apólice",
+                "🔍 Pesquisar e Visualizar Apólices",
             ]
             if st.session_state.user_perfil == 'admin':
-                menu_options.append("⚙️ Configurações")
+                # menu_options.append("⚙️ Configurações") # Desabilitado por enquanto
+                pass
             menu_opcao = st.radio("Menu Principal", menu_options)
             st.divider()
             if st.button("🚪 Sair do Sistema", use_container_width=True):
@@ -635,14 +439,10 @@ def main():
                 st.warning(f"Não foi possível carregar o logótipo principal: {e}")
         st.write("")
 
-        if menu_opcao == "📊 Painel de Controle":
-            render_dashboard()
-        elif menu_opcao == "➕ Cadastrar Apólice":
+        if menu_opcao == "➕ Cadastrar Apólice":
             render_cadastro_form()
-        elif menu_opcao == "🔍 Pesquisar e Editar Apólice":
+        elif menu_opcao == "🔍 Pesquisar e Visualizar Apólices":
             render_pesquisa_e_edicao()
-        elif menu_opcao == "⚙️ Configurações" and st.session_state.user_perfil == 'admin':
-            render_configuracoes()
 
     except Exception as e:
         st.error("Ocorreu um erro crítico na aplicação.")
