@@ -4,6 +4,7 @@ pandas
 requests
 SQLAlchemy
 supabase
+python-dateutil
 
 # Dependências da API
 fastapi
