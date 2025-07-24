@@ -301,8 +301,10 @@ def render_dashboard():
                 else:
                     st.info(f"Nenhuma apólice com prioridade '{prioridade.split(' ')[-1]}'.")
 
+# Substitua a sua função render_cadastro_form por esta:
+
 def render_cadastro_form():
-    """FUNÇÃO ATUALIZADA: Formulário de cadastro com lógica condicional para Frota e Boleto a Vista."""
+    """FUNÇÃO ATUALIZADA: Com data da 1ª parcela separada e formato de data DD/MM/YYYY."""
     st.title("➕ Cadastrar Nova Apólice")
 
     if 'is_frota' not in st.session_state:
@@ -347,15 +349,27 @@ def render_cadastro_form():
             st.selectbox("Tipo de Cobrança*", options=opcoes_cobranca, index=opcoes_cobranca.index(tipo_cobranca_selecionado), key="select_cobranca", disabled=st.session_state.is_frota)
 
         st.subheader("Vigência e Parcelamento")
-        col1, col2, col3 = st.columns(3)
+        col1, col2, col3, col4 = st.columns(4)
         with col1:
-            data_inicio = st.date_input("📅 Início de Vigência*")
+            # --- ALTERADO: Formato da data ---
+            data_inicio = st.date_input("📅 Início de Vigência*", format="DD/MM/YYYY")
         with col2:
-            dia_vencimento = st.number_input("Dia do Vencimento*", min_value=1, max_value=31, value=10)
+            # --- NOVO: Campo para a data completa da 1ª parcela ---
+            vencimento_primeira_parcela = st.date_input("📅 Vencimento da 1ª Parcela*", format="DD/MM/YYYY")
         with col3:
-            quantidade_parcelas = st.number_input("Quantidade de Parcelas*", min_value=1, max_value=24, value=qtd_parcelas_valor, disabled=campos_parcelas_travados, key="qtd_parcelas")
+            # --- NOVO: Campo apenas para o dia das demais parcelas ---
+            dia_vencimento_demais = st.number_input("Dia Venc. Demais Parcelas*", min_value=1, max_value=31, value=23)
+        with col4:
+            quantidade_parcelas = st.number_input(
+                "Quantidade de Parcelas*",
+                min_value=1, max_value=24,
+                value=qtd_parcelas_valor,
+                disabled=campos_parcelas_travados,
+                key="qtd_parcelas"
+            )
 
         st.subheader("Valores e Comissão")
+        # Demais campos permanecem iguais
         col1, col2 = st.columns(2)
         with col1:
             valor_parcela_str = st.text_input("💰 Valor de Cada Parcela (R$)*", value="0,00")
@@ -393,12 +407,13 @@ def render_cadastro_form():
 
             try:
                 with conn.session as s:
+                    # --- ALTERADO: 'dia_vencimento' agora se refere ao dia das demais parcelas ---
                     apolice_data = {
                         'seguradora': seguradora, 'cliente': cliente, 'numero_apolice': numero_apolice,
                         'placa': placa_final, 'tipo_seguro': tipo_seguro, 'tipo_cobranca': tipo_cobranca_final,
                         'valor_parcela': valor_parcela, 'comissao': comissao,
                         'data_inicio_vigencia': data_inicio, 'quantidade_parcelas': quantidade_parcelas,
-                        'dia_vencimento': dia_vencimento, 'contato': contato, 'email': email,
+                        'dia_vencimento': dia_vencimento_demais, 'contato': contato, 'email': email,
                         'observacoes': observacoes, 'status': 'Ativa',
                         'caminho_pdf_apolice': caminho_pdf_apolice_url,
                         'caminho_pdf_boletos': caminho_pdf_boletos_url
@@ -410,18 +425,24 @@ def render_cadastro_form():
                     ''')
                     apolice_id = s.execute(query_apolice, apolice_data).scalar_one()
 
+                    # --- ALTERADO: Nova lógica para cálculo das parcelas ---
                     lista_parcelas_para_db = []
-                    data_base = data_inicio
-                    if dia_vencimento < data_inicio.day:
-                        data_base += relativedelta(months=1)
-
                     for i in range(quantidade_parcelas):
-                        vencimento_calculado = date(data_base.year, data_base.month, dia_vencimento)
+                        numero_da_parcela = i + 1
+                        if i == 0:
+                            # A primeira parcela usa a data exata informada pelo usuário
+                            vencimento_calculado = vencimento_primeira_parcela
+                        else:
+                            # As demais parcelas são calculadas
+                            # A base do cálculo é a data da primeira parcela + 'i' meses
+                            data_base_demais = vencimento_primeira_parcela + relativedelta(months=i)
+                            # Constrói a nova data usando o ano e mês calculados, mas o 'dia' informado para as demais
+                            vencimento_calculado = date(data_base_demais.year, data_base_demais.month, dia_vencimento_demais)
+                        
                         lista_parcelas_para_db.append({
-                            "apolice_id": apolice_id, "numero_parcela": i + 1,
+                            "apolice_id": apolice_id, "numero_parcela": numero_da_parcela,
                             "data_vencimento": vencimento_calculado, "valor": valor_parcela, "status": "Pendente"
                         })
-                        data_base += relativedelta(months=1)
 
                     if lista_parcelas_para_db:
                         query_parcelas = text('INSERT INTO parcelas (apolice_id, numero_parcela, data_vencimento, valor, status) VALUES (:apolice_id, :numero_parcela, :data_vencimento, :valor, :status)')
