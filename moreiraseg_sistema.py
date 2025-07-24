@@ -1,5 +1,5 @@
 # moreiraseg_sistema.py
-# VERSÃO REATORADA COM GESTÃO DE PARCELAS AUTOMATIZADA
+# VERSÃO REATORADA COM GESTÃO DE PARCELAS AUTOMATIZADA (E LOGIN CORRIGIDO)
 
 import streamlit as st
 import pandas as pd
@@ -343,7 +343,7 @@ def render_pesquisa_e_edicao():
                 col1.metric("Valor da Parcela", f"R$ {apolice_row.get('valor_parcela', 0.0):,.2f}")
                 col2.metric("Quantidade de Parcelas", apolice_row.get('quantidade_parcelas', 0))
                 col3.metric("Dia do Vencimento", f"Todo dia {apolice_row.get('dia_vencimento', 0)}")
-                
+
                 # Links para os PDFs
                 if apolice_row.get('caminho_pdf_apolice'):
                     st.link_button("Ver PDF da Apólice", apolice_row['caminho_pdf_apolice'])
@@ -361,7 +361,7 @@ def render_pesquisa_e_edicao():
                     st.dataframe(parcelas_df[['numero_parcela', 'data_vencimento', 'valor', 'status']], use_container_width=True)
                 else:
                     st.warning("Nenhuma parcela encontrada para esta apólice.")
-                
+
                 # Adicionar lógica de edição aqui se necessário no futuro
 
 
@@ -396,13 +396,13 @@ def main():
                     senha = st.text_input("🔑 Senha", type="password")
                     submit = st.form_submit_button("Entrar", use_container_width=True)
                     if submit:
-                        # A função login_user precisa ser definida ou adaptada
-                        # Por enquanto, usando um login simples para demonstração
-                        with conn.session as s:
-                            user_query = text("SELECT * FROM usuarios WHERE email = :email AND senha = :senha")
-                            user_df = pd.read_sql(user_query, s, params={'email': email, 'senha': senha})
-                        if not user_df.empty:
-                            usuario = user_df.to_dict('records')[0]
+                        # <<< CORREÇÃO APLICADA AQUI >>>
+                        # A função conn.query() é a forma correta e segura de executar a consulta
+                        user_query = "SELECT * FROM usuarios WHERE email = :email AND senha = :senha"
+                        usuario_df = conn.query(user_query, params={'email': email, 'senha': senha}, ttl=10)
+
+                        if not usuario_df.empty:
+                            usuario = usuario_df.to_dict('records')[0]
                             st.session_state.user_email = usuario['email']
                             st.session_state.user_nome = usuario['nome']
                             st.session_state.user_perfil = usuario['perfil']
