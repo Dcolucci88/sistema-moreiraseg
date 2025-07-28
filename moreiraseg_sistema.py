@@ -194,6 +194,7 @@ def update_apolice(apolice_id, update_data):
                     last_day = calendar.monthrange(data_base_demais.year, data_base_demais.month)[1]
                     valid_day = min(dia_vencimento_demais, last_day)
                     vencimento_calculado = date(data_base_demais.year, data_base_demais.month, valid_day)
+                # --- CORREÇÃO DE INDENTAÇÃO APLICADA AQUI ---
                 lista_parcelas_para_db.append({
                     "apolice_id": apolice_id, "numero_parcela": i + 1,
                     "data_vencimento": vencimento_calculado, "valor": valor_parcela, "status": "Pendente"
@@ -211,10 +212,8 @@ def update_apolice(apolice_id, update_data):
 # --- RENDERIZAÇÃO DA INTERFACE ---
 
 def render_dashboard():
-    """FUNÇÃO ATUALIZADA: Painel de Controle com abas e filtro de datas futuras."""
     st.title("📊 Painel de Controle")
     tab_parcelas, tab_renovacoes = st.tabs(["📊 Controle de Parcelas", "🔥 Controle de Renovações"])
-    
     with tab_parcelas:
         try:
             parcelas_df = conn.query("SELECT * FROM parcelas", ttl=60)
@@ -222,11 +221,9 @@ def render_dashboard():
         except Exception as e:
             st.error(f"Erro ao carregar dados para o dashboard de parcelas: {e}")
             return
-
         st.subheader("Visão Financeira (Parcelas)")
         col1, col2, col3, col4 = st.columns(4)
         col1.metric("Total de Apólices Ativas", total_apolices)
-        
         if not parcelas_df.empty:
             today = pd.to_datetime(date.today()).tz_localize(None)
             parcelas_df['data_vencimento'] = pd.to_datetime(parcelas_df['data_vencimento'])
@@ -234,119 +231,19 @@ def render_dashboard():
             col2.metric("Parcelas Pendentes", len(pendentes_df))
             valor_pendente = pendentes_df['valor'].sum()
             col3.metric("Valor Total Pendente", f"R${valor_pendente:,.2f}")
-            urgentes_df = pendentes_df[(parcelas_df['data_vencimento'] >= today) & (parcelas_df['data_vencimento'] <= today + pd.Timedelta(days=15)) & (parcelas_df['status'] == 'Pendente')]
-            col4.metric("Parcelas Urgentes", len(urgentes_df), "Vencem em até 15 dias")
-        else:
-            col2.metric("Parcelas Pendentes", 0)
-            col3.metric("Valor Total Pendente", "R$ 0,00")
-            col4.metric("Parcelas Urgentes", 0)
-            
-        st.divider()
-        st.subheader("Situação das Próximas Parcelas a Vencer")
-        # --- ALTERAÇÃO APLICADA AQUI ---
-        if not parcelas_df.empty and 'id' in parcelas_df.columns:
-            # Filtra para mostrar apenas parcelas pendentes com vencimento a partir de hoje
-            hoje = pd.to_datetime(date.today())
-            proximas_a_vencer = parcelas_df[(parcelas_df['status'] == 'Pendente') & (parcelas_df['data_vencimento'] >= hoje)].sort_values(by='data_vencimento').head(15)
-            
-            if not proximas_a_vencer.empty:
-                apolice_info_df = conn.query("SELECT id, cliente, numero_apolice FROM apolices", ttl=60)
-                proximas_a_vencer = pd.merge(proximas_a_vencer, apolice_info_df, left_on='apolice_id', right_on='id')
-                cols_to_show = ['cliente', 'numero_apolice', 'numero_parcela', 'data_vencimento', 'valor']
-                proximas_a_vencer['data_vencimento'] = proximas_a_vencer['data_vencimento'].dt.strftime('%d/%m/%Y')
-                st.dataframe(proximas_a_vencer[cols_to_show], use_container_width=True)
-            else:
-                st.info("Nenhuma parcela pendente com vencimento futuro para exibir.")
-        else:
-            st.info("Nenhuma parcela cadastrada no sistema.")
-
-    with tab_renovacoes:
-        apolices_df = get_apolices()
-        st.subheader("Visão de Renovação de Apólices")
-        if apolices_df.empty:
-            st.info("Nenhuma apólice cadastrada para analisar as renovações.")
-            return
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Total de Apólices Ativas", len(apolices_df))
-        a_renovar_df = apolices_df[apolices_df['dias_restantes'].between(0, 60)]
-        col2.metric("Apólices a Renovar", len(a_renovar_df), "Próximos 60 dias")
-        expiradas_df = apolices_df[apolices_df['dias_restantes'] < 0]
-        col3.metric("Apólices Expiradas", len(expiradas_df))
-        st.divider()
-        st.subheader("Apólices por Prioridade de Renovação")
-        prioridades_map = {
-            '🔥 Urgente': apolices_df[apolices_df['prioridade'] == '🔥 Urgente'],
-            '⚠️ Alta': apolices_df[apolices_df['prioridade'] == '⚠️ Alta'],
-            '⚠️ Média': apolices_df[apolices_df['prioridade'] == '⚠️ Média'],
-            '✅ Baixa': apolices_df[apolices_df['prioridade'] == '✅ Baixa'],
-            '⚪ Expirada': expiradas_df
-        }
-        tabs_renovacao = st.tabs(list(prioridades_map.keys()))
-        cols_to_show_renovacao = ['cliente', 'numero_apolice', 'tipo_seguro', 'data_final_de_vigencia', 'dias_restantes']
-        for tab, (prioridade, df) in zip(tabs_renovacao, prioridades_map.items()):
-            with tab:
-                if not df.empty:
-                    df_display = df.copy()
-                    df_display['data_final_de_vigencia'] = df_display['data_final_de_vigencia'].dt.strftime('%d/%m/%Y')
-                    st.dataframe(df_display[cols_to_show_renovacao], use_container_width=True)
-                else:
-                    st.info(f"Nenhuma apólice com prioridade '{prioridade.split(' ')[-1]}'.")
-
-# Substitua sua função render_dashboard por esta versão atualizada:
-
-def render_dashboard():
-    """FUNÇÃO ATUALIZADA: Painel de Controle com abas e filtro de datas futuras para os próximos 30 dias."""
-    st.title("📊 Painel de Controle")
-    tab_parcelas, tab_renovacoes = st.tabs(["📊 Controle de Parcelas", "🔥 Controle de Renovações"])
-    
-    with tab_parcelas:
-        try:
-            parcelas_df = conn.query("SELECT * FROM parcelas", ttl=60)
-            total_apolices = conn.query("SELECT COUNT(id) as count FROM apolices", ttl=60)['count'][0]
-        except Exception as e:
-            st.error(f"Erro ao carregar dados para o dashboard de parcelas: {e}")
-            return
-
-        st.subheader("Visão Financeira (Parcelas)")
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Total de Apólices Ativas", total_apolices)
-        
-        if not parcelas_df.empty:
-            today = pd.to_datetime(date.today()).tz_localize(None)
-            parcelas_df['data_vencimento'] = pd.to_datetime(parcelas_df['data_vencimento'])
-            pendentes_df = parcelas_df[parcelas_df['status'] == 'Pendente']
-            col2.metric("Parcelas Pendentes", len(pendentes_df))
-            valor_pendente = pendentes_df['valor'].sum()
-            col3.metric("Valor Total Pendente", f"R${valor_pendente:,.2f}")
-            
-            # --- LÓGICA ALTERADA AQUI ---
-            # O cálculo de "Parcelas Urgentes" agora também usa a nova regra de 30 dias
             data_limite_urgente = today + pd.Timedelta(days=30)
-            urgentes_df = pendentes_df[
-                (pendentes_df['data_vencimento'] >= today) & 
-                (pendentes_df['data_vencimento'] <= data_limite_urgente)
-            ]
+            urgentes_df = pendentes_df[(pendentes_df['data_vencimento'] >= today) & (pendentes_df['data_vencimento'] <= data_limite_urgente)]
             col4.metric("Parcelas Urgentes", len(urgentes_df), "Vencem nos próximos 30 dias")
         else:
             col2.metric("Parcelas Pendentes", 0)
             col3.metric("Valor Total Pendente", "R$ 0,00")
             col4.metric("Parcelas Urgentes", 0)
-            
         st.divider()
         st.subheader("Situação das Parcelas a Vencer nos Próximos 30 Dias")
-        
         if not parcelas_df.empty and 'id' in parcelas_df.columns:
-            # --- LÓGICA ALTERADA AQUI ---
-            # Filtra para mostrar apenas parcelas pendentes com vencimento entre hoje e os próximos 30 dias
             hoje_dt = pd.to_datetime(date.today())
             data_limite_30_dias = hoje_dt + pd.Timedelta(days=30)
-            
-            proximas_a_vencer = parcelas_df[
-                (parcelas_df['status'] == 'Pendente') & 
-                (parcelas_df['data_vencimento'] >= hoje_dt) &
-                (parcelas_df['data_vencimento'] <= data_limite_30_dias)
-            ].sort_values(by='data_vencimento')
-            
+            proximas_a_vencer = parcelas_df[(parcelas_df['status'] == 'Pendente') & (parcelas_df['data_vencimento'] >= hoje_dt) & (parcelas_df['data_vencimento'] <= data_limite_30_dias)].sort_values(by='data_vencimento')
             if not proximas_a_vencer.empty:
                 apolice_info_df = conn.query("SELECT id, cliente, numero_apolice FROM apolices", ttl=60)
                 proximas_a_vencer = pd.merge(proximas_a_vencer, apolice_info_df, left_on='apolice_id', right_on='id')
@@ -357,9 +254,7 @@ def render_dashboard():
                 st.info("Nenhuma parcela pendente com vencimento nos próximos 30 dias.")
         else:
             st.info("Nenhuma parcela cadastrada no sistema.")
-
     with tab_renovacoes:
-        # O código desta aba não precisa de alterações
         apolices_df = get_apolices()
         st.subheader("Visão de Renovação de Apólices")
         if apolices_df.empty:
@@ -390,6 +285,122 @@ def render_dashboard():
                     st.dataframe(df_display[cols_to_show_renovacao], use_container_width=True)
                 else:
                     st.info(f"Nenhuma apólice com prioridade '{prioridade.split(' ')[-1]}'.")
+
+def render_cadastro_form():
+    st.title("➕ Cadastrar Nova Apólice")
+    if 'is_frota' not in st.session_state: st.session_state.is_frota = False
+    if 'tipo_cobranca' not in st.session_state: st.session_state.tipo_cobranca = "Boleto"
+    with st.form("form_cadastro", clear_on_submit=False):
+        st.subheader("Dados da Apólice")
+        st.session_state.is_frota = st.toggle("É uma apólice de Frota?", key="toggle_frota", value=st.session_state.is_frota)
+        col1, col2 = st.columns(2)
+        with col1:
+            seguradora = st.text_input("Seguradora*", max_chars=50)
+            numero_apolice = st.text_input("Número da Apólice*", max_chars=50)
+            tipo_seguro = st.selectbox("Tipo de Seguro*", ["Automóvel", "RCO", "Vida", "Residencial", "Empresarial", "Saúde", "Viagem", "Fiança", "Outro"])
+        with col2:
+            cliente = st.text_input("Cliente*", max_chars=100)
+            if st.session_state.is_frota:
+                placas_input = st.text_area("Placas da Frota (uma por linha)*", height=105, help="Digite cada placa em uma nova linha.")
+                placa_unica_input = ""
+            else:
+                placa_unica_input = st.text_input("🚗 Placa do Veículo (Opcional)", max_chars=10)
+                placas_input = ""
+            opcoes_cobranca = ["Boleto", "Boleto a Vista", "Faturamento", "Cartão de Crédito", "Débito em Conta"]
+            if st.session_state.is_frota:
+                tipo_cobranca_selecionado = "Faturamento"
+                qtd_parcelas_valor = 12
+                campos_parcelas_travados = True
+            elif st.session_state.get('select_cobranca') == "Boleto a Vista":
+                tipo_cobranca_selecionado = "Boleto a Vista"
+                qtd_parcelas_valor = 1
+                campos_parcelas_travados = True
+            else:
+                tipo_cobranca_selecionado = st.session_state.get('select_cobranca', "Boleto")
+                qtd_parcelas_valor = 10
+                campos_parcelas_travados = False
+            st.selectbox("Tipo de Cobrança*", options=opcoes_cobranca, index=opcoes_cobranca.index(tipo_cobranca_selecionado), key="select_cobranca", disabled=st.session_state.is_frota)
+        st.subheader("Vigência e Parcelamento")
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            data_inicio = st.date_input("📅 Início de Vigência*", format="DD/MM/YYYY")
+        with col2:
+            vencimento_primeira_parcela = st.date_input("📅 Vencimento da 1ª Parcela*", format="DD/MM/YYYY")
+        with col3:
+            dia_vencimento_demais = st.number_input("Dia Venc. Demais Parcelas*", min_value=1, max_value=31, value=23)
+        with col4:
+            quantidade_parcelas = st.number_input("Quantidade de Parcelas*", min_value=1, max_value=24, value=qtd_parcelas_valor, disabled=campos_parcelas_travados, key="qtd_parcelas")
+        st.subheader("Valores e Comissão")
+        col1, col2 = st.columns(2)
+        with col1:
+            valor_parcela_str = st.text_input("💰 Valor de Cada Parcela (R$)*", value="0,00")
+        with col2:
+            comissao = st.number_input("💼 Comissão (%)", min_value=0.0, max_value=100.0, value=10.0, step=0.5, format="%.2f")
+        st.subheader("Dados de Contato e Anexos")
+        contato = st.text_input("📱 Contato do Cliente*", max_chars=100)
+        email = st.text_input("📧 E-mail do Cliente", max_chars=100)
+        observacoes = st.text_area("📝 Observações", height=100)
+        pdf_apolice_file = st.file_uploader("📎 Anexar PDF da Apólice (Opcional)", type=["pdf"])
+        pdf_boletos_file = st.file_uploader("📎 Anexar Carnê de Boletos (PDF único, opcional)", type=["pdf"])
+        submitted = st.form_submit_button("💾 Salvar Apólice e Gerar Parcelas", use_container_width=True)
+        if submitted:
+            if st.session_state.is_frota:
+                placa_final = ", ".join([p.strip() for p in placas_input.split('\n') if p.strip()])
+            else:
+                placa_final = placa_unica_input
+            tipo_cobranca_final = st.session_state.select_cobranca
+            valor_parcela = float(valor_parcela_str.replace(',', '.')) if valor_parcela_str else 0.0
+            if valor_parcela <= 0:
+                st.error("O valor da parcela deve ser maior que zero.")
+                return
+            if not all([seguradora, cliente, numero_apolice, contato, placa_final if st.session_state.is_frota else True]):
+                st.error("Por favor, preencha todos os campos obrigatórios (*).")
+                return
+            caminho_pdf_apolice_url = salvar_ficheiros_supabase(pdf_apolice_file, numero_apolice, cliente, 'apolices') if pdf_apolice_file else None
+            caminho_pdf_boletos_url = salvar_ficheiros_supabase(pdf_boletos_file, numero_apolice, cliente, 'boletos') if pdf_boletos_file else None
+            try:
+                with conn.session as s:
+                    apolice_data = {
+                        'seguradora': seguradora, 'cliente': cliente, 'numero_apolice': numero_apolice,
+                        'placa': placa_final, 'tipo_seguro': tipo_seguro, 'tipo_cobranca': tipo_cobranca_final,
+                        'valor_parcela': valor_parcela, 'comissao': comissao,
+                        'data_inicio_vigencia': data_inicio, 'quantidade_parcelas': quantidade_parcelas,
+                        'dia_vencimento': dia_vencimento_demais, 'contato': contato, 'email': email,
+                        'observacoes': observacoes, 'status': 'Ativa',
+                        'caminho_pdf_apolice': caminho_pdf_apolice_url,
+                        'caminho_pdf_boletos': caminho_pdf_boletos_url
+                    }
+                    query_apolice = text('''
+                        INSERT INTO apolices (seguradora, cliente, numero_apolice, placa, tipo_seguro, tipo_cobranca, valor_parcela, comissao, data_inicio_vigencia, quantidade_parcelas, dia_vencimento, contato, email, observacoes, status, caminho_pdf_apolice, caminho_pdf_boletos)
+                        VALUES (:seguradora, :cliente, :numero_apolice, :placa, :tipo_seguro, :tipo_cobranca, :valor_parcela, :comissao, :data_inicio_vigencia, :quantidade_parcelas, :dia_vencimento, :contato, :email, :observacoes, :status, :caminho_pdf_apolice, :caminho_pdf_boletos)
+                        RETURNING id
+                    ''')
+                    apolice_id = s.execute(query_apolice, apolice_data).scalar_one()
+                    lista_parcelas_para_db = []
+                    for i in range(quantidade_parcelas):
+                        if i == 0:
+                            vencimento_calculado = vencimento_primeira_parcela
+                        else:
+                            data_base_demais = vencimento_primeira_parcela + relativedelta(months=i)
+                            last_day = calendar.monthrange(data_base_demais.year, data_base_demais.month)[1]
+                            valid_day = min(dia_vencimento_demais, last_day)
+                            vencimento_calculado = date(data_base_demais.year, data_base_demais.month, valid_day)
+                        # --- CORREÇÃO DE INDENTAÇÃO APLICADA AQUI ---
+                        lista_parcelas_para_db.append({
+                            "apolice_id": apolice_id, "numero_parcela": i + 1,
+                            "data_vencimento": vencimento_calculado, "valor": valor_parcela, "status": "Pendente"
+                        })
+                    if lista_parcelas_para_db:
+                        query_parcelas = text('INSERT INTO parcelas (apolice_id, numero_parcela, data_vencimento, valor, status) VALUES (:apolice_id, :numero_parcela, :data_vencimento, :valor, :status)')
+                        s.execute(query_parcelas, lista_parcelas_para_db)
+                    s.commit()
+                    add_historico(apolice_id, st.session_state.get('user_email', 'sistema'), 'Cadastro de Apólice', f"Apólice '{numero_apolice}' e {quantidade_parcelas} parcelas geradas.")
+                    st.success(f"🎉 Apólice '{numero_apolice}' e suas {quantidade_parcelas} parcelas foram salvas!")
+                    st.balloons()
+            except psycopg2.errors.UniqueViolation:
+                st.error(f"❌ Erro: O número de apólice '{numero_apolice}' já existe.")
+            except Exception as e:
+                st.error(f"❌ Ocorreu um erro inesperado ao salvar: {e}")
 
 def render_pesquisa_e_edicao():
     st.title("🔍 Pesquisar e Editar Apólice")
