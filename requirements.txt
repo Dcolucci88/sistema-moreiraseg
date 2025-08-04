@@ -1,12 +1,23 @@
-# Dependências do Streamlit
-streamlit
-pandas
-requests
-SQLAlchemy
-supabase
-python-dateutil
+# --- Dependências do Agente de IA e Lógica Principal ---
+langchain              # Framework principal para construir o agente de IA
+langchain-groq         # Integração específica para usar os modelos da Groq (Llama)
+pypdf                  # Para ler e extrair texto dos arquivos PDF dos boletos
+python-dotenv          # Para carregar variáveis de ambiente (suas chaves de API) de um arquivo .env
+schedule               # Para agendar a execução da tarefa de cobrança diária
 
-# Dependências da API
-fastapi
-uvicorn[standard]
-psycopg2-binary
+# --- Dependências da Interface Web (Dashboard) ---
+streamlit              # Para criar o painel de controle e monitoramento
+pandas                 # Útil para manipulação de dados e exibição em tabelas no Streamlit
+requests               # Para fazer requisições HTTP, pode ser útil em várias integrações
+
+# --- Dependências de Banco de Dados e Conexões ---
+supabase               # Cliente oficial do Supabase para interagir com o banco e storage
+SQLAlchemy             # ORM para interagir com o banco de dados (boa prática)
+psycopg2-binary        # Driver necessário para o Python se comunicar com bancos PostgreSQL (como o Supabase)
+
+# --- Dependências da API (para receber respostas do WhatsApp) ---
+fastapi                # Framework para criar a API que receberá os webhooks
+uvicorn[standard]      # Servidor para rodar a sua API FastAPI
+
+# --- Dependências de Utilitários ---
+python-dateutil        # Biblioteca poderosa para manipulação de datas e horas
