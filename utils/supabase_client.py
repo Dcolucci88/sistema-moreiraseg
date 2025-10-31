@@ -7,17 +7,25 @@ from supabase import create_client, Client
 import pandas as pd
 import re  # Importado para a função de upload
 
-# --- LÓGICA DE CARREGAMENTO HÍBRIDA (CORRIGIDA) ---
+# --- LÓGICA DE CARREGAMENTO HÍBRIDA (VERSÃO MAIS ROBUSTA) ---
 
+SUPABASE_URL = None
+SUPABASE_KEY = None
+
+# 1. Tenta carregar dos "Secrets" do Streamlit (para deploy na nuvem)
 try:
-    # 1. Tenta carregar dos "Secrets" do Streamlit (para deploy na nuvem)
-    #    Ele lê os "Secrets" que você configurou no formato TOML
-    SUPABASE_URL = st.secrets["supabase_url"]
-    SUPABASE_KEY = st.secrets["supabase_key"]
-    # print("Credenciais carregadas via Streamlit Secrets (Modo Deploy).")
+    # Verificamos se a chave existe antes de tentar acessá-la
+    if "supabase_url" in st.secrets:
+        SUPABASE_URL = st.secrets["supabase_url"]
+        SUPABASE_KEY = st.secrets["supabase_key"]
+        # print("Credenciais carregadas via Streamlit Secrets (Modo Deploy).")
+except Exception as e:
+    # Se 'st.secrets' falhar por qualquer motivo, registramos e continuamos
+    print(f"Erro ao acessar st.secrets: {e}")
+    pass
 
-except (KeyError, FileNotFoundError):
-    # 2. Se falhar (está rodando no seu PC), carrega do arquivo .env
+# 2. Se falhar (está rodando no seu PC ou os secrets falharam), carrega do .env
+if not SUPABASE_URL:
     # print("Credenciais não encontradas no Streamlit Secrets. Carregando do arquivo .env (Modo Local).")
     load_dotenv()
     SUPABASE_URL = os.environ.get("SUPABASE_URL")
@@ -26,9 +34,9 @@ except (KeyError, FileNotFoundError):
 # --- VALIDAÇÃO E CRIAÇÃO DO CLIENTE ---
 
 if not SUPABASE_URL or not SUPABASE_KEY:
-    # Este erro agora aparecerá no log do Streamlit Cloud se os "Secrets" estiverem errados
-    st.error("ERRO CRÍTICO: As credenciais do Supabase (URL e Key) não foram encontradas.")
-    st.stop()
+    # Este erro agora DEVE aparecer no seu app se os secrets estiverem errados
+    st.error("ERRO CRÍTICO: As credenciais do Supabase (URL e Key) não foram encontradas. Verifique seus 'Secrets' no painel do Streamlit Cloud.")
+    st.stop() # Para o app aqui
 
 try:
     # Cliente Supabase principal (agora usa as variáveis corretas)
