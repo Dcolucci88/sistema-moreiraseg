@@ -9,11 +9,14 @@ import re
 import calendar
 from dateutil.relativedelta import relativedelta
 import ast
+from supabase import create_client, Client # <-- IMPORT ADICIONADO
+from utils.supabase_client import get_apolices # <-- IMPORT ADICIONADO
 
 # --- CONEXÃO UNIFICADA E MÓDulos DO PROJETO ---
 try:
     # Importações do seu client centralizado
-    from utils.supabase_client import supabase, get_apolices, buscar_todas_as_parcelas_pendentes
+    # (get_apolices foi movido para cima, para o escopo global)
+    from utils.supabase_client import supabase, buscar_todas_as_parcelas_pendentes
     from agent_logic import executar_agente
 except ImportError as e:
     # Tentativa de importar as funções que o seu agente de IA precisa
@@ -24,7 +27,7 @@ except ImportError as e:
         st.error(
             f"Erro ao importar módulos essenciais: {e}. Verifique se os arquivos utils/supabase_client.py e agent_logic.py estão corretos.")
         st.stop()
-# --- COLE O NOVO BLOCO DE VERIFICAÇÃO AQUI ---
+
 # --- VERIFICAÇÃO DE CONEXÃO OBRIGATÓRIA ---
 # Importa o cliente (que pode ser 'None' se as chaves não foram carregadas)
 from utils.supabase_client import supabase
@@ -34,7 +37,6 @@ if supabase is None:
     st.info("Verifique se suas 'Secrets' no Streamlit Cloud estão corretas (formato TOML) e reinicie o app.")
     st.stop() # Para o aplicativo aqui
 # --- FIM DA VERIFICAÇÃO ---
-# --- FIM DO NOVO BLOCO ---
 
 # --- CONFIGURAÇÕES GLOBAIS ---
 ASSETS_DIR = "assets"
@@ -894,9 +896,18 @@ def render_configuracoes():
         st.info("Esta lista mostra todos os usuários registrados no sistema de autenticação.")
 
         try:
-            # 1. BUSCAR USUÁRIOS DO SUPABASE AUTH, NÃO DA TABELA 'usuarios'
-            response = supabase.auth.admin.list_users()
+            # --- CORREÇÃO 1: CRIAR CLIENTE ADMIN SEGURO ---
+            # Para listar/criar usuários, precisamos da 'service_role' key.
+            admin_url = st.secrets["supabase_url"]
+            admin_key = st.secrets["supabase_service_key"]
+
+            # Cria um cliente temporário com privilégios de admin
+            supabase_admin: Client = create_client(admin_url, admin_key)
+
+            # 1. BUSCAR USUÁRIOS (usando o cliente admin)
+            response = supabase_admin.auth.admin.list_users()
             users_list = response.users
+            # --- FIM DA CORREÇÃO 1 (LISTAR) ---
 
             if users_list:
                 # Processa a lista de usuários para exibição em um DataFrame
@@ -918,6 +929,7 @@ def render_configuracoes():
 
         except Exception as e:
             st.error(f"Erro ao listar usuários do Supabase Auth: {e}")
+            st.info("Verifique se a 'supabase_service_key' está configurada corretamente nos 'Secrets' do Streamlit.")
 
         # --- Formulário para Adicionar Novo Usuário (VERSÃO ATUALIZADA) ---
         with st.expander("➕ Adicionar Novo Usuário"):
@@ -935,8 +947,14 @@ def render_configuracoes():
                         st.warning("Todos os campos são obrigatórios.")
                     else:
                         try:
-                            # 2. CRIAR USUÁRIO USANDO SUPABASE AUTH, NÃO UM INSERT NA TABELA
-                            user_response = supabase.auth.admin.create_user({
+                            # 2. CRIAR USUÁRIO (usando o cliente admin, que já foi criado)
+                            # Se o cliente admin não foi criado acima (devido a um erro), crie-o agora
+                            if 'supabase_admin' not in locals():
+                                admin_url = st.secrets["supabase_url"]
+                                admin_key = st.secrets["supabase_service_key"]
+                                supabase_admin: Client = create_client(admin_url, admin_key)
+
+                            user_response = supabase_admin.auth.admin.create_user({
                                 "email": email,
                                 "password": senha,
                                 "email_confirm": True,  # Confirma o e-mail automaticamente
@@ -946,39 +964,32 @@ def render_configuracoes():
                                 }
                             })
                             st.success(f"✅ Usuário '{nome}' criado com sucesso!")
-                            # st.rerun() força a página a recarregar para mostrar o novo usuário na lista
                             st.rerun()
 
                         except Exception as e:
                             st.error(f"❌ Erro ao criar usuário: {e}")
 
-    # --- ABA 2: BACKUP (Permanece igual) ---
+    # --- ABA 2: BACKUP (COM CORREÇÕES) ---
     with tab2:
         st.subheader("Backup de Dados (Exportar)")
         st.info("Exporte um arquivo CSV com todas as apólices ativas no sistema.")
         try:
-            all_data_df = get_apolices()  # Supondo que você tenha essa função
+            all_data_df = get_apolices()
             if not all_data_df.empty:
                 csv_data = all_data_df.to_csv(index=False).encode('utf-8')
+
+                # --- CORREÇÃO 2: Adicionar uma 'key' ---
                 st.download_button(
                     label="📥 Exportar Backup de Apólices (CSV)",
                     data=csv_data,
                     file_name=f"backup_apolices_{date.today()}.csv",
-                    mime="text/csv"
+                    mime="text/csv",
+                    key="download_backup_csv"  # <-- CORREÇÃO DO BUG DUPLICATE ID
                 )
             else:
                 st.info("Nenhuma apólice para exportar.")
         except Exception as e:
             st.error(f"Não foi possível gerar o backup: {e}")
-    with tab2:
-        st.subheader("Backup de Dados (Exportar)")
-        all_data_df = get_apolices()
-        if not all_data_df.empty:
-            csv_data = all_data_df.to_csv(index=False).encode('utf-8')
-            st.download_button(label="📥 Exportar Backup de Apólices (CSV)", data=csv_data,
-                               file_name=f"backup_apolices_{date.today()}.csv", mime="text/csv")
-        else:
-            st.info("Nenhuma apólice para exportar.")
 
 
 def render_agente_ia():
