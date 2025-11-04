@@ -41,10 +41,10 @@ if SUPABASE_URL and SUPABASE_KEY:
         print(f"Erro ao criar cliente Supabase: {e}")
         supabase = None
 else:
+    # Se as chaves não foram encontradas, supabase permanece None
+    # print("Chaves do Supabase não encontradas. Cliente não inicializado.")
+    pass  # <--- ADICIONE ESTA LINHA AQUI
 
-
-# Se as chaves não foram encontradas, supabase permanece None
-# print("Chaves do Supabase não encontradas. Cliente não inicializado.")
 
 # --- FIM DA LÓGICA DE CONEXÃO ---
 
