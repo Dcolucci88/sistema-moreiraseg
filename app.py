@@ -657,7 +657,7 @@ def render_acompanhamento_sinistros():
     # --- Lista de Todos os Sinistros ---
     st.subheader("Todos os Sinistros Cadastrados")
     status_options = ["Comunicado", "Agendado", "Vistoriado", "Aguardando Autorização", "Autorizado", "Negado",
-                      "Finalizado", "Pendente"]
+                      "Finalizado", "Acordo", "Pendente"]
 
     for index, row in sinistros_df.iterrows():
         # ATUALIZAÇÃO: Adicionada verificação de segurança para a coluna 'id'
