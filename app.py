@@ -897,21 +897,22 @@ def render_configuracoes():
 
         try:
             # --- CORREÇÃO 1: CRIAR CLIENTE ADMIN SEGURO ---
-            # Para listar/criar usuários, precisamos da 'service_role' key.
             admin_url = st.secrets["supabase_url"]
             admin_key = st.secrets["supabase_service_key"]
-
-            # Cria um cliente temporário com privilégios de admin
             supabase_admin: Client = create_client(admin_url, admin_key)
 
             # 1. BUSCAR USUÁRIOS (usando o cliente admin)
             response = supabase_admin.auth.admin.list_users()
-            users_list = response.users
-            # --- FIM DA CORREÇÃO 1 (LISTAR) ---
+
+            # --- ESTA É A CORREÇÃO ---
+            # A resposta 'response' JÁ É a lista de usuários.
+            users_list = response
+            # --- FIM DA CORREÇÃO ---
 
             if users_list:
                 # Processa a lista de usuários para exibição em um DataFrame
                 processed_users = []
+                # (O loop 'for user in users_list' agora funciona)
                 for user in users_list:
                     processed_users.append({
                         'Nome Completo': user.user_metadata.get('nome_completo', 'N/A'),
@@ -948,7 +949,6 @@ def render_configuracoes():
                     else:
                         try:
                             # 2. CRIAR USUÁRIO (usando o cliente admin, que já foi criado)
-                            # Se o cliente admin não foi criado acima (devido a um erro), crie-o agora
                             if 'supabase_admin' not in locals():
                                 admin_url = st.secrets["supabase_url"]
                                 admin_key = st.secrets["supabase_service_key"]
@@ -957,7 +957,7 @@ def render_configuracoes():
                             user_response = supabase_admin.auth.admin.create_user({
                                 "email": email,
                                 "password": senha,
-                                "email_confirm": True,  # Confirma o e-mail automaticamente
+                                "email_confirm": True,
                                 "user_metadata": {
                                     "nome_completo": nome,
                                     "perfil": perfil
@@ -978,13 +978,12 @@ def render_configuracoes():
             if not all_data_df.empty:
                 csv_data = all_data_df.to_csv(index=False).encode('utf-8')
 
-                # --- CORREÇÃO 2: Adicionar uma 'key' ---
                 st.download_button(
                     label="📥 Exportar Backup de Apólices (CSV)",
                     data=csv_data,
                     file_name=f"backup_apolices_{date.today()}.csv",
                     mime="text/csv",
-                    key="download_backup_csv"  # <-- CORREÇÃO DO BUG DUPLICATE ID
+                    key="download_backup_csv"
                 )
             else:
                 st.info("Nenhuma apólice para exportar.")
