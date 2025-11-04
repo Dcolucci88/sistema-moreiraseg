@@ -1,50 +1,52 @@
 import os
-import streamlit as st  # Importante: Precisamos do streamlit aqui
+import streamlit as st
 from datetime import date, timedelta
 from dateutil.relativedelta import relativedelta
 from dotenv import load_dotenv
 from supabase import create_client, Client
 import pandas as pd
-import re  # Importado para a função de upload
+import re
 
-# --- LÓGICA DE CARREGAMENTO HÍBRIDA (VERSÃO MAIS ROBUSTA) ---
+# --- LÓGICA DE CARREGAMENTO HÍBRIDA (VERSÃO SCRIPT-SAFE) ---
 
 SUPABASE_URL = None
 SUPABASE_KEY = None
+supabase: Client = None  # Inicializa o cliente como None
 
-# 1. Tenta carregar dos "Secrets" do Streamlit (para deploy na nuvem)
+# 1. Tenta carregar dos "Secrets" do Streamlit
 try:
-    # Verificamos se a chave existe antes de tentar acessá-la
+    # st.secrets só existe se estivermos em um app Streamlit
     if "supabase_url" in st.secrets:
         SUPABASE_URL = st.secrets["supabase_url"]
         SUPABASE_KEY = st.secrets["supabase_key"]
-        # print("Credenciais carregadas via Streamlit Secrets (Modo Deploy).")
-except Exception as e:
-    # Se 'st.secrets' falhar por qualquer motivo, registramos e continuamos
-    print(f"Erro ao acessar st.secrets: {e}")
+        # print("Credenciais carregadas via Streamlit Secrets.")
+except Exception:
+    # Ignora o erro. Isso acontece se for importado por um script.
     pass
 
-# 2. Se falhar (está rodando no seu PC ou os secrets falharam), carrega do .env
+# 2. Se falhar (está rodando no PC ou é um script), tenta o .env
 if not SUPABASE_URL:
-    # print("Credenciais não encontradas no Streamlit Secrets. Carregando do arquivo .env (Modo Local).")
+    # print("Carregando do .env")
     load_dotenv()
     SUPABASE_URL = os.environ.get("SUPABASE_URL")
     SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 
-# --- VALIDAÇÃO E CRIAÇÃO DO CLIENTE ---
+# 3. Tenta criar o cliente APENAS se as chaves foram encontradas
+if SUPABASE_URL and SUPABASE_KEY:
+    try:
+        supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+        # print("Cliente Supabase inicializado.")
+    except Exception as e:
+        # Se a criação falhar, supabase continuará como None
+        print(f"Erro ao criar cliente Supabase: {e}")
+        supabase = None
+else:
 
-if not SUPABASE_URL or not SUPABASE_KEY:
-    # Este erro agora DEVE aparecer no seu app se os secrets estiverem errados
-    st.error("ERRO CRÍTICO: As credenciais do Supabase (URL e Key) não foram encontradas. Verifique seus 'Secrets' no painel do Streamlit Cloud.")
-    st.stop() # Para o app aqui
 
-try:
-    # Cliente Supabase principal (agora usa as variáveis corretas)
-    supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-    # print("Cliente Supabase inicializado com sucesso.")
-except Exception as e:
-    st.error(f"Falha ao inicializar o cliente Supabase: {e}")
-    st.stop()
+# Se as chaves não foram encontradas, supabase permanece None
+# print("Chaves do Supabase não encontradas. Cliente não inicializado.")
+
+# --- FIM DA LÓGICA DE CONEXÃO ---
 
 
 # --- SUAS FUNÇÕES ORIGINAIS (INTACTAS) ---
