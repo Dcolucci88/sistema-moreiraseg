@@ -86,7 +86,7 @@ st.set_page_config(layout="wide", page_title="MOREIRASEG - Corretora Inteligente
 st.markdown("<h1 style='text-align: center; margin-top: -30px;'>Painel de Gestão da MOREIRASEG</h1>", unsafe_allow_html=True)
 
 # Exemplo de conteúdo principal (você pode ter mais conteúdo aqui)
-st.markdown("Bem-vindo ao painel inteligente.")
+st.markdown("<p style='text-align: center;'>Bem-vindo ao painel inteligente.</p>", unsafe_allow_html=True)
 
 # --- FIM DA ESTRUTURA PRINCIPAL ---
 # ... (o restante do seu código Streamlit, como exibição de dados ou gráficos) ...
