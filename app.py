@@ -1048,7 +1048,7 @@ def render_agente_ia():
     """
     Nova interface de chat para o Agente MoreiraSeg.
     """
-    st.title("🤖 Assistente MoreiraSeg (IA)")
+    st.title("🤖 Assistente Moreiraseg (IA)")
     st.caption("Seu copiloto para cobranças, consultas e gestão.")
 
     # --- BOTÃO DE AÇÃO (Movido para cá) ---
@@ -1075,7 +1075,7 @@ def render_agente_ia():
     if "messages" not in st.session_state:
         st.session_state.messages = [
             {"role": "assistant",
-             "content": "Olá! Sou a IA da MoreiraSeg. Posso verificar cobranças do dia, consultar códigos de barras ou dar baixa em pagamentos. Como posso ajudar?"}
+             "content": "Olá! Sou a IA da Moreiraseg. Posso verificar cobranças do dia, consultar códigos de barras e te enviar. Como posso ajudar?"}
         ]
 
     # 2. Exibir Histórico
