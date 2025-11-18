@@ -85,29 +85,6 @@ st.set_page_config(layout="wide", page_title="MOREIRASEG - Corretora Inteligente
 
 st.title("Painel de Gestão da MOREIRASEG")
 
-
-# =========================================================================
-# === LOCAL IDEAL PARA O BOTÃO MANUAL NA BARRA LATERAL ===
-# =========================================================================
-
-# Adicionando a funcionalidade de execução manual do fluxo
-with st.sidebar:
-    st.header("Automação Proativa")
-    st.write("O lembrete de cobrança está agendado para as 09:00 (diariamente).")
-
-    # Botão que executa o fluxo manualmente
-    if st.button("▶️ Executar Fluxo de Cobrança Agora (Manual)", use_container_width=True):
-        with st.spinner("Executando Agente de IA para Cobranças..."):
-            # Chama a função principal do agente
-            resultado_agente = executar_agente(
-                "Execute o fluxo de trabalho de cobrança e envie os lembretes de vencimento de hoje."
-            )
-            # Exibe o resultado da execução (o resumo gerado pelo agente)
-            st.success(f"Execução Concluída:\n\n{resultado_agente}")
-
-# =========================================================================
-
-
 # Exemplo de conteúdo principal (você pode ter mais conteúdo aqui)
 st.markdown("Bem-vindo ao painel inteligente. Utilize a barra lateral para acessar ferramentas e automações.")
 
