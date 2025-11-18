@@ -83,10 +83,10 @@ ASSETS_DIR = "assets"
 
 st.set_page_config(layout="wide", page_title="MOREIRASEG - Corretora Inteligente")
 
-st.title("Painel de Gestão da MOREIRASEG")
+st.markdown("<h1 style='text-align: center; margin-top: -30px;'>Painel de Gestão da MOREIRASEG</h1>", unsafe_allow_html=True)
 
 # Exemplo de conteúdo principal (você pode ter mais conteúdo aqui)
-st.markdown("Bem-vindo ao painel inteligente. Utilize a barra lateral para acessar ferramentas e automações.")
+st.markdown("Bem-vindo ao painel inteligente.")
 
 # --- FIM DA ESTRUTURA PRINCIPAL ---
 # ... (o restante do seu código Streamlit, como exibição de dados ou gráficos) ...
