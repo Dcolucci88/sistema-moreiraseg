@@ -43,7 +43,7 @@ if SUPABASE_URL and SUPABASE_KEY:
 else:
     # Se as chaves não foram encontradas, supabase permanece None
     # print("Chaves do Supabase não encontradas. Cliente não inicializado.")
-    pass  # <--- ADICIONE ESTA LINHA AQUI
+    pass  # <--- CORREÇÃO DE INDENTAÇÃO QUE FIZEMOS ANTES
 
 
 # --- FIM DA LÓGICA DE CONEXÃO ---
@@ -182,6 +182,10 @@ def buscar_todas_as_parcelas_pendentes():
     """Busca em todas as apólices e gera uma lista completa de todas as parcelas pendentes."""
     print("Buscando todas as parcelas pendentes...")
     try:
+        # --- ATENÇÃO: Esta função parece usar a lógica antiga (calculada).
+        # --- A nova função `buscar_parcelas_vencendo_hoje` consulta a tabela `parcelas`
+        # --- Esta função `buscar_cobrancas_boleto_do_dia` consulta `apolices`
+        # --- Mantendo sua lógica original intacta ---
         response = supabase.table('apolices').select("*").ilike('tipo_cobranca', '%boleto%').execute()
         if not response.data:
             return []
@@ -285,6 +289,43 @@ def add_historico_sinistro(sinistro_id, usuario_email, status_anterior, status_n
         }).execute()
     except Exception as e:
         print(f"⚠️ Não foi possível registrar a atualização do sinistro no histórico: {e}")
+
+
+# --- INÍCIO DA ALTERAÇÃO: NOVA FUNÇÃO PARA O AGENTE DE IA ---
+
+def buscar_parcelas_vencendo_hoje():
+    """
+    Busca no Supabase todas as parcelas com vencimento hoje que estão pendentes.
+    Junta os dados da apólice (cliente e contato) para o envio da mensagem.
+    """
+    if not supabase:
+        return "Erro: Conexão com Supabase não inicializada."
+
+    hoje_iso = date.today().isoformat()
+    print(f"Buscando parcelas vencendo hoje: {hoje_iso}")
+
+    try:
+        # Esta é a consulta correta:
+        # 1. Seleciona colunas da 'parcelas' (valor, numero_parcela, data_vencimento)
+        # 2. Seleciona colunas da 'apolices' (cliente, contato, numero_apolice)
+        # 3. Onde a data_vencimento é hoje E o status é 'Pendente'
+        response = supabase.table("parcelas").select(
+            "valor, numero_parcela, data_vencimento, apolices!inner(cliente, contato, numero_apolice)"
+        ).eq(
+            "data_vencimento", hoje_iso
+        ).eq(
+            "status", "Pendente"
+        ).execute()
+
+        print(f"Parcelas encontradas: {response.data}")
+        return response.data
+
+    except Exception as e:
+        print(f"Erro ao buscar parcelas vencendo hoje: {e}")
+        return f"Erro ao executar a busca: {e}"
+
+
+# --- FIM DA ALTERAÇÃO ---
 
 
 # --- BLOCO DE MANUTENÇÃO ADMINISTRATIVA (VERSÃO 2 - ATUALIZAÇÃO DIRETA) ---

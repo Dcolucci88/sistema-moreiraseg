@@ -9,34 +9,110 @@ import re
 import calendar
 from dateutil.relativedelta import relativedelta
 import ast
-from supabase import create_client, Client # <-- IMPORT ADICIONADO
-from utils.supabase_client import get_apolices # <-- IMPORT ADICIONADO
+from supabase import create_client, Client
+from utils.supabase_client import get_apolices
+import threading # <-- NOVO IMPORT PARA O AGENDADOR
+import time # <-- NOVO IMPORT PARA O AGENDADOR
 
-# --- CONEXÃO UNIFICADA E MÓDulos DO PROJETO ---
+# --- IMPORTAÇÕES EXTRAS (AGENDADOR E AGENTE) ---
+import schedule  # Biblioteca para rodar o robô as 09:00
+
+# Tenta importar a lógica do Agente (O CÉREBRO QUE CRIAMOS)
 try:
-    # Importações do seu client centralizado
-    # (get_apolices foi movido para cima, para o escopo global)
-    from utils.supabase_client import supabase, buscar_todas_as_parcelas_pendentes
     from agent_logic import executar_agente
+except ImportError:
+    # Cria uma função falsa apenas para o app não quebrar se o arquivo sumir
+    def executar_agente(cmd): return f"Erro: agent_logic.py não encontrado."
+
+# Tenta importar as funções do banco de dados
+try:
+    from utils.supabase_client import (
+        supabase,
+        get_apolices,
+        buscar_todas_as_parcelas_pendentes,
+        buscar_parcelas_vencendo_hoje,
+        atualizar_status_pagamento
+    )
 except ImportError as e:
-    # Tentativa de importar as funções que o seu agente de IA precisa
-    try:
-        from utils.supabase_client import buscar_cobrancas_boleto_do_dia, atualizar_status_pagamento, \
-            buscar_parcela_atual
-    except ImportError:
-        st.error(
-            f"Erro ao importar módulos essenciais: {e}. Verifique se os arquivos utils/supabase_client.py e agent_logic.py estão corretos.")
-        st.stop()
+    st.error(f"Erro crítico de importação: {e}")
+    st.stop()
 
 # --- VERIFICAÇÃO DE CONEXÃO OBRIGATÓRIA ---
-# Importa o cliente (que pode ser 'None' se as chaves não foram carregadas)
 from utils.supabase_client import supabase
 
 if supabase is None:
     st.error("ERRO CRÍTICO DE CONEXÃO: O cliente Supabase não pôde ser inicializado.")
     st.info("Verifique se suas 'Secrets' no Streamlit Cloud estão corretas (formato TOML) e reinicie o app.")
-    st.stop() # Para o aplicativo aqui
+    st.stop()
 # --- FIM DA VERIFICAÇÃO ---
+
+# --- INICIALIZAÇÃO DO AGENDADOR EM THREAD SEPARADA ---
+# A função de loop do agendador (do arquivo scheduler.py) será movida para cá.
+
+def agendador_loop():
+    """Função que roda o loop de verificação do agendamento (schedule)"""
+    # Garante que a tarefa de cobrança seja configurada
+    schedule.every().day.at("09:00").do(executar_fluxo_de_cobranca)
+    print("Agendador de threads: Tarefa de cobrança configurada.")
+
+    # Loop infinito para manter o agendador ativo
+    while True:
+        # Verifica se há tarefas pendentes e as executa
+        schedule.run_pending()
+        # Não precisa ser muito rápido, 60 segundos é suficiente
+        time.sleep(60)
+
+    # Verifica se o agendador já foi inicializado na sessão
+
+
+if 'scheduler_thread' not in st.session_state:
+    st.session_state['scheduler_thread_stop'] = False  # Variável de controle (opcional)
+
+    # Cria e inicia a thread
+    scheduler_thread = threading.Thread(target=agendador_loop, daemon=True)  # Daemon=True permite que o app encerre
+    scheduler_thread.start()
+    st.session_state['scheduler_thread'] = scheduler_thread
+    print("Thread do Agendador de Cobrança iniciada com sucesso.")
+
+# --- CONFIGURAÇÕES GLOBAIS ---
+ASSETS_DIR = "assets"
+
+# ----------------------------
+# SEÇÃO PRINCIPAL DO STREAMLIT
+# ----------------------------
+
+st.set_page_config(layout="wide", page_title="MOREIRASEG - Corretora Inteligente")
+
+st.title("Painel de Gestão da MOREIRASEG")
+
+
+# =========================================================================
+# === LOCAL IDEAL PARA O BOTÃO MANUAL NA BARRA LATERAL ===
+# =========================================================================
+
+# Adicionando a funcionalidade de execução manual do fluxo
+with st.sidebar:
+    st.header("Automação Proativa")
+    st.write("O lembrete de cobrança está agendado para as 09:00 (diariamente).")
+
+    # Botão que executa o fluxo manualmente
+    if st.button("▶️ Executar Fluxo de Cobrança Agora (Manual)", use_container_width=True):
+        with st.spinner("Executando Agente de IA para Cobranças..."):
+            # Chama a função principal do agente
+            resultado_agente = executar_agente(
+                "Execute o fluxo de trabalho de cobrança e envie os lembretes de vencimento de hoje."
+            )
+            # Exibe o resultado da execução (o resumo gerado pelo agente)
+            st.success(f"Execução Concluída:\n\n{resultado_agente}")
+
+# =========================================================================
+
+
+# Exemplo de conteúdo principal (você pode ter mais conteúdo aqui)
+st.markdown("Bem-vindo ao painel inteligente. Utilize a barra lateral para acessar ferramentas e automações.")
+
+# --- FIM DA ESTRUTURA PRINCIPAL ---
+# ... (o restante do seu código Streamlit, como exibição de dados ou gráficos) ...
 
 # --- CONFIGURAÇÕES GLOBAIS ---
 ASSETS_DIR = "assets"
@@ -992,30 +1068,63 @@ def render_configuracoes():
 
 
 def render_agente_ia():
-    """Renderiza o painel de controle do Agente de IA."""
-    st.title("🤖 Painel do Agente de IA")
-    st.markdown("Interaja e monitore seu assistente de cobrança.")
-    if st.button("Verificar Cobranças de Hoje Manualmente", use_container_width=True, type="primary"):
-        with st.spinner("O agente está verificando as apólices com vencimento hoje..."):
-            resposta = executar_agente("Verifique e liste as cobranças com vencimento para hoje.")
-            st.success("Verificação concluída!")
-            try:
-                lista_cobrancas = ast.literal_eval(resposta)
-                if isinstance(lista_cobrancas, list) and len(lista_cobrancas) > 0:
-                    st.write("Apólices encontradas para notificação:")
-                    st.json(lista_cobrancas)
-                else:
-                    st.info("Nenhuma cobrança pendente para hoje.")
-            except:
-                st.write("Resposta do agente:")
-                st.write(resposta)
-    st.divider()
-    st.subheader("Converse com seu Agente")
-    comando_usuario = st.text_input("Digite um comando:", placeholder="Ex: O cliente da apólice 783 pediu o boleto.")
-    if comando_usuario:
-        with st.spinner("Agente processando seu comando..."):
-            resposta_direta = executar_agente(comando_usuario)
-            st.info(f"**Resposta do Agente:** {resposta_direta}")
+    """
+    Nova interface de chat para o Agente MoreiraSeg.
+    """
+    st.title("🤖 Assistente MoreiraSeg (IA)")
+    st.caption("Seu copiloto para cobranças, consultas e gestão.")
+
+    # 1. Inicializar Histórico de Chat
+    if "messages" not in st.session_state:
+        st.session_state.messages = [
+            {"role": "assistant",
+             "content": "Olá! Sou a IA da MoreiraSeg. Posso verificar cobranças do dia, consultar códigos de barras ou dar baixa em pagamentos. Como posso ajudar?"}
+        ]
+
+    # 2. Exibir Histórico
+    for message in st.session_state.messages:
+        avatar = "assets/Icone.png" if message["role"] == "assistant" else None  # Ajuste o caminho do ícone se precisar
+        with st.chat_message(message["role"], avatar=avatar):
+            st.markdown(message["content"])
+
+    # 3. Botões de Ação Rápida (Sidebar Específica desta tela)
+    with st.sidebar:
+        st.divider()
+        st.header("⚡ Ações Rápidas IA")
+        if st.button("📅 Verificar Cobranças de Hoje", use_container_width=True):
+            prompt = "Verifique e liste as cobranças com vencimento para hoje."
+            st.session_state.messages.append({"role": "user", "content": prompt})
+            st.rerun()
+
+            # 4. Campo de Entrada do Usuário (Chat Input)
+    if prompt := st.chat_input("Digite sua solicitação (ex: 'Baixar apólice 10020')..."):
+        # Exibe msg usuario
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        with st.chat_message("user"):
+            st.markdown(prompt)
+
+        # Processa a resposta da IA
+        with st.chat_message("assistant", avatar="assets/Icone.png"):  # Ajuste o ícone se precisar
+            with st.spinner("Processando solicitação..."):
+                try:
+                    # AQUI CHAMA O SEU ARQUIVO AGENT_LOGIC.PY
+                    resposta = executar_agente(prompt)
+
+                    # Efeito de digitação
+                    placeholder = st.empty()
+                    full_response = ""
+                    if len(resposta) > 500:
+                        placeholder.markdown(resposta)
+                    else:
+                        for chunk in resposta.split(' '):
+                            full_response += chunk + ' '
+                            time.sleep(0.02)
+                            placeholder.markdown(full_response + "▌")
+                        placeholder.markdown(resposta)
+
+                    st.session_state.messages.append({"role": "assistant", "content": resposta})
+                except Exception as e:
+                    st.error(f"Erro: {e}")
 
 
 def main():
@@ -1060,6 +1169,15 @@ def main():
 
         menu_opcao = st.radio("Menu Principal", menu_options)
         st.divider()
+
+        # Botão manual para disparar o agente
+        if st.button("⚡ Executar Cobrança Agora", help="Força o envio de mensagens para quem vence hoje",
+                     use_container_width=True):
+            with st.spinner("Ativando agente..."):
+                res = executar_agente(
+                    "Execute o fluxo de trabalho de cobrança e envie os lembretes de vencimento de hoje.")
+                st.success("Comando enviado!")
+                st.toast(res, icon="✅")
         # Na sua barra lateral (with st.sidebar:)
         if st.button("🚪 Sair do Sistema", use_container_width=True):
             try:
