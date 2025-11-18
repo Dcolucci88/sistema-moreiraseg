@@ -1074,6 +1074,26 @@ def render_agente_ia():
     st.title("🤖 Assistente MoreiraSeg (IA)")
     st.caption("Seu copiloto para cobranças, consultas e gestão.")
 
+    # --- BOTÃO DE AÇÃO (Movido para cá) ---
+    with st.sidebar:
+        st.divider()
+        st.header("⚡ Ações Rápidas IA")
+
+        if st.button("▶️ Executar Fluxo de Cobrança Agora", use_container_width=True):
+            with st.spinner("O Agente está verificando todas as cobranças..."):
+                try:
+                    # Chama o agente para rodar o fluxo completo
+                    res = executar_agente(
+                        "Execute o fluxo de trabalho de cobrança e envie os lembretes de vencimento de hoje.")
+                    st.success("Fluxo Executado!")
+                    # Adiciona o resultado no chat para ficar registrado
+                    st.session_state.messages.append(
+                        {"role": "assistant", "content": f"✅ **Resultado do Fluxo Manual:**\n\n{res}"})
+                except Exception as e:
+                    st.error(f"Erro ao executar fluxo: {e}")
+
+    # --- FIM DO BOTÃO ---
+
     # 1. Inicializar Histórico de Chat
     if "messages" not in st.session_state:
         st.session_state.messages = [
@@ -1083,34 +1103,24 @@ def render_agente_ia():
 
     # 2. Exibir Histórico
     for message in st.session_state.messages:
-        avatar = "assets/Icone.png" if message["role"] == "assistant" else None  # Ajuste o caminho do ícone se precisar
+        avatar = "assets/Icone.png" if message["role"] == "assistant" else None
         with st.chat_message(message["role"], avatar=avatar):
             st.markdown(message["content"])
 
-    # 3. Botões de Ação Rápida (Sidebar Específica desta tela)
-    with st.sidebar:
-        st.divider()
-        st.header("⚡ Ações Rápidas IA")
-        if st.button("📅 Verificar Cobranças de Hoje", use_container_width=True):
-            prompt = "Verifique e liste as cobranças com vencimento para hoje."
-            st.session_state.messages.append({"role": "user", "content": prompt})
-            st.rerun()
-
-            # 4. Campo de Entrada do Usuário (Chat Input)
-    if prompt := st.chat_input("Digite sua solicitação (ex: 'Baixar apólice 10020')..."):
+    # 3. Campo de Entrada do Usuário
+    if prompt := st.chat_input("Digite sua solicitação (ex: 'Qual o boleto da apólice 1002800150679?')..."):
         # Exibe msg usuario
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
             st.markdown(prompt)
 
         # Processa a resposta da IA
-        with st.chat_message("assistant", avatar="assets/Icone.png"):  # Ajuste o ícone se precisar
-            with st.spinner("Processando solicitação..."):
+        with st.chat_message("assistant", avatar="assets/Icone.png"):
+            with st.spinner("Consultando dados..."):
                 try:
-                    # AQUI CHAMA O SEU ARQUIVO AGENT_LOGIC.PY
+                    # AQUI CHAMA O CÉREBRO (agent_logic.py)
                     resposta = executar_agente(prompt)
 
-                    # Efeito de digitação
                     placeholder = st.empty()
                     full_response = ""
                     if len(resposta) > 500:
@@ -1124,7 +1134,9 @@ def render_agente_ia():
 
                     st.session_state.messages.append({"role": "assistant", "content": resposta})
                 except Exception as e:
-                    st.error(f"Erro: {e}")
+                    erro_msg = f"❌ Ocorreu um erro técnico ao processar sua solicitação: {e}"
+                    st.error(erro_msg)
+                    st.session_state.messages.append({"role": "assistant", "content": erro_msg})
 
 
 def main():
