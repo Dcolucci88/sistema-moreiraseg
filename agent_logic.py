@@ -285,7 +285,7 @@ if GEMINI_API_KEY and META_ACCESS_TOKEN and AGENT_IMPORTS_AVAILABLE:
     try:
         # Inicializa o LLM com o modelo atualizado
         llm = ChatGoogleGenerativeAI(
-            model="gemini-1.5-flash",
+            model="gemini-flash-latest",
             google_api_key=GEMINI_API_KEY,
             temperature=0.1,
             max_output_tokens=4096
