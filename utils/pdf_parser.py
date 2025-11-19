@@ -1,50 +1,51 @@
-import pypdf
+import io
 import re
-from io import BytesIO
+from pypdf import PdfReader
 
-def extrair_codigo_de_barras(arquivo_pdf_bytes: bytes, data_vencimento_alvo: str) -> str:
+
+def extrair_codigo_de_barras(pdf_bytes: bytes, data_vencimento: str = None) -> str:
     """
-    Abre um arquivo PDF a partir de seu conteúdo em bytes, encontra o texto 
-    e extrai o código de barras do boleto com a data de vencimento correta.
-
-    Args:
-        arquivo_pdf_bytes: O conteúdo do arquivo PDF em bytes.
-        data_vencimento_alvo: A data de vencimento no formato 'dd/mm/yyyy' para localizar o boleto certo.
-
-    Returns:
-        O código de barras (linha digitável) encontrado ou uma mensagem de erro.
+    Lê um PDF em memória e tenta encontrar a linha digitável do boleto.
     """
     try:
-        # Usa BytesIO para ler o conteúdo do PDF que está em memória
-        pdf_file = BytesIO(arquivo_pdf_bytes)
-        
-        reader = pypdf.PdfReader(pdf_file)
+        # Cria um objeto de leitura de PDF a partir dos bytes
+        pdf_file = io.BytesIO(pdf_bytes)
+        reader = PdfReader(pdf_file)
+
         texto_completo = ""
+
+        # Extrai texto de todas as páginas
         for page in reader.pages:
-            texto_completo += page.extract_text()
+            texto_completo += page.extract_text() + "\n"
 
-        # Regex para encontrar um código de barras no formato de linha digitável.
-        # Este padrão é robusto, mas pode precisar de ajustes dependendo do layout do seu boleto.
-        padrao_codigo_barras = r'\d{5}\.\d{5}\s\d{5}\.\d{6}\s\d{5}\.\d{6}\s\d\s\d{14}'
+        # Limpeza básica para facilitar a busca
+        texto_limpo = texto_completo.replace('\n', ' ').replace('  ', ' ')
 
-        # Lógica para encontrar o boleto correto na página.
-        # Muitos PDFs de carnê têm múltiplos boletos. Usamos a data de vencimento para achar o certo.
-        # Dividimos o texto em blocos usando "Vencimento" como separador.
-        blocos = re.split(r'(Vencimento)', texto_completo, flags=re.IGNORECASE)
-        
-        for i, bloco in enumerate(blocos):
-            # Se a data de vencimento alvo estiver neste bloco de texto...
-            if data_vencimento_alvo in bloco:
-                # ...procuramos o código de barras neste mesmo bloco.
-                codigo_encontrado = re.search(padrao_codigo_barras, bloco)
-                
-                if codigo_encontrado:
-                    print(f"Código de barras encontrado para o vencimento {data_vencimento_alvo}.")
-                    return codigo_encontrado.group(0)
+        # --- ESTRATÉGIA 1: REGEX ESPECÍFICO (Boleto Formatado) ---
+        # Procura por blocos de números comuns em boletos com pontuação
+        padrao_linha_digitavel = r'\d{5}\.?\d{5} ?\d{5}\.?\d{6} ?\d{5}\.?\d{6} ?\d ?\d{14}'
+        match = re.search(padrao_linha_digitavel, texto_limpo)
 
-        print(f"Não foi possível localizar um código de barras para a data {data_vencimento_alvo}.")
-        return "Código de barras não localizado para o vencimento especificado."
+        if match:
+            return match.group(0)
+
+        # --- ESTRATÉGIA 2: BUSCA BRUTA (Sequência de 47/48 dígitos) ---
+        # Remove tudo que não é número (pontos, espaços, letras)
+        numeros = re.sub(r'\D', '', texto_completo)
+
+        # Boletos bancários geralmente têm 47 ou 48 dígitos
+        # Se encontrarmos uma "tripa" de números desse tamanho, é quase certeza que é o boleto
+        if len(numeros) >= 47:
+            # Tenta achar uma sequência contínua de 47 dígitos
+            match_bruto = re.search(r'\d{47}', numeros)
+            if match_bruto:
+                c = match_bruto.group(0)
+                # Formata para ficar legível (AAAAA.BBBBB CCCCC.DDDDD ...)
+                # Essa formatação ajuda o cliente a ler e o app do banco a aceitar
+                return f"{c[:5]}.{c[5:10]} {c[10:15]}.{c[15:21]} {c[21:26]}.{c[26:32]} {c[32]} {c[33:]}"
+
+        return None
 
     except Exception as e:
-        print(f"Erro ao processar o arquivo PDF: {e}")
-        return "Erro ao ler o arquivo PDF."
+        print(f"Erro ao ler PDF: {e}")
+        return None
