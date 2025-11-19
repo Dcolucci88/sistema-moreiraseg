@@ -1,379 +1,199 @@
 import os
-import streamlit as st
-from datetime import date, timedelta
-from dateutil.relativedelta import relativedelta
 from dotenv import load_dotenv
 from supabase import create_client, Client
-import pandas as pd
-import re
+from datetime import date, datetime
+from typing import List, Dict, Any, Union
+import requests  # Necessário para baixar via URL
 
-# --- LÓGICA DE CARREGAMENTO HÍBRIDA (VERSÃO SCRIPT-SAFE) ---
+# Carrega variáveis
+load_dotenv()
 
-SUPABASE_URL = None
-SUPABASE_KEY = None
-supabase: Client = None  # Inicializa o cliente como None
+url: str = os.environ.get("SUPABASE_URL")
+key: str = os.environ.get("SUPABASE_KEY")
 
-# 1. Tenta carregar dos "Secrets" do Streamlit
-try:
-    # st.secrets só existe se estivermos em um app Streamlit
-    if "supabase_url" in st.secrets:
-        SUPABASE_URL = st.secrets["supabase_url"]
-        SUPABASE_KEY = st.secrets["supabase_key"]
-        # print("Credenciais carregadas via Streamlit Secrets.")
-except Exception:
-    # Ignora o erro. Isso acontece se for importado por um script.
-    pass
-
-# 2. Se falhar (está rodando no PC ou é um script), tenta o .env
-if not SUPABASE_URL:
-    # print("Carregando do .env")
-    load_dotenv()
-    SUPABASE_URL = os.environ.get("SUPABASE_URL")
-    SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
-
-# 3. Tenta criar o cliente APENAS se as chaves foram encontradas
-if SUPABASE_URL and SUPABASE_KEY:
-    try:
-        supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-        # print("Cliente Supabase inicializado.")
-    except Exception as e:
-        # Se a criação falhar, supabase continuará como None
-        print(f"Erro ao criar cliente Supabase: {e}")
-        supabase = None
+if not url or not key:
+    print("ERRO CRÍTICO: Credenciais do Supabase não encontradas no .env")
+    supabase = None
 else:
-    # Se as chaves não foram encontradas, supabase permanece None
-    # print("Chaves do Supabase não encontradas. Cliente não inicializado.")
-    pass  # <--- CORREÇÃO DE INDENTAÇÃO QUE FIZEMOS ANTES
+    supabase: Client = create_client(url, key)
 
 
-# --- FIM DA LÓGICA DE CONEXÃO ---
+# --- FUNÇÕES DE BUSCA ---
 
-
-# --- SUAS FUNÇÕES ORIGINAIS (INTACTAS) ---
-# O resto do seu arquivo permanece exatamente o mesmo.
-
-def adicionar_dias_uteis(data_inicial: date, dias_uteis: int) -> date:
-    """Adiciona um número de dias úteis a uma data, pulando fins de semana."""
-    dias_adicionados = 0
-    data_atual = data_inicial
-    while dias_adicionados < dias_uteis:
-        data_atual += timedelta(days=1)
-        if data_atual.weekday() < 5:
-            dias_adicionados += 1
-    return data_atual
-
-
-def buscar_cobrancas_boleto_do_dia():
-    """Busca no Supabase as apólices com parcela vencendo hoje, retornando apenas os dados essenciais."""
-    hoje = date.today()
-    print(f"Buscando cobranças para o dia {hoje.strftime('%d/%m/%Y')}...")
-    colunas_necessarias = "numero_apolice, placa, contato, data_inicio_vigencia, quantidade_parcelas, dia_vencimento"
+def buscar_todas_as_parcelas_pendentes() -> List[Dict[str, Any]]:
+    """Busca todas as parcelas com status Pendente."""
     try:
-        response = supabase.table('apolices').select(colunas_necessarias).ilike('tipo_cobranca', '%boleto%').execute()
+        response = supabase.table("parcelas") \
+            .select("*, apolices(cliente, numero_apolice, contato, placa, email)") \
+            .eq("status", "Pendente") \
+            .execute()
+        return response.data
     except Exception as e:
-        print(f"Erro ao buscar apólices no Supabase: {e}")
-        return []
-    if not response.data:
-        print("Nenhuma apólice com tipo de cobrança contendo 'boleto' foi encontrada no banco de dados.")
+        print(f"Erro ao buscar todas parcelas: {e}")
         return []
 
-    apolices_com_vencimento_hoje = []
-    for apolice in response.data:
-        numero_apolice = apolice.get('numero_apolice')
-        print(f"\n--- Verificando Apólice: {numero_apolice} ---")
-        inicio_vigencia_str = apolice.get('data_inicio_vigencia')
-        qtd_parcelas = apolice.get('quantidade_parcelas')
-        dia_vencimento_padrao = apolice.get('dia_vencimento')
-        if not all([inicio_vigencia_str, qtd_parcelas, dia_vencimento_padrao]):
-            print("  -> Dados incompletos, pulando apólice.")
-            continue
-        inicio_vigencia = date.fromisoformat(inicio_vigencia_str)
-        for i in range(1, int(qtd_parcelas) + 1):
-            vencimento_calculado = None
-            if i == 1:
-                vencimento_calculado = adicionar_dias_uteis(inicio_vigencia, 5)
-            else:
-                data_base_parcela = inicio_vigencia + relativedelta(months=1)
-                vencimento_calculado = data_base_parcela + relativedelta(months=i - 2)
-                try:
-                    vencimento_calculado = vencimento_calculado.replace(day=int(dia_vencimento_padrao))
-                except ValueError:
-                    ultimo_dia_mes = (vencimento_calculado.replace(day=28) + timedelta(days=4)).replace(
-                        day=1) - timedelta(days=1)
-                    vencimento_calculado = ultimo_dia_mes
-            print(f"  Parcela {i}: Vencimento Calculado = {vencimento_calculado.strftime('%d/%m/%Y')}")
-            if vencimento_calculado == hoje:
-                print(f"  ✅ VENCIMENTO ENCONTRADO PARA HOJE!")
-                print(f"  -> Apólice {numero_apolice} adicionada à lista de cobrança.")
-                apolice['data_vencimento_atual'] = hoje.isoformat()
-                apolices_com_vencimento_hoje.append(apolice)
-                break
-    if not apolices_com_vencimento_hoje:
-        print("\nNenhum boleto de apólice vence hoje.")
-    return apolices_com_vencimento_hoje
 
-
-def atualizar_status_pagamento(numero_apolice: str, data_vencimento: date):
-    chave_status = f"status_pagamento_{data_vencimento.strftime('%m_%Y')}"
-    update_data = {chave_status: 'Pago'}
+def buscar_parcelas_vencendo_hoje() -> List[Dict[str, Any]]:
+    """Busca parcelas que vencem na data de hoje (Servidor)."""
+    hoje = date.today().isoformat()
+    print(f"DEBUG: Buscando parcelas vencendo hoje: {hoje}")
     try:
-        supabase.table('apolices').update(update_data).eq('numero_apolice', numero_apolice).execute()
-        print(
-            f"Status da apólice {numero_apolice} para o mês {data_vencimento.strftime('%m/%Y')} atualizado para 'Pago'.")
-        return True
+        response = supabase.table("parcelas") \
+            .select("*, apolices(cliente, numero_apolice, contato, placa)") \
+            .eq("status", "Pendente") \
+            .eq("data_vencimento", hoje) \
+            .execute()
+        print(f"DEBUG: Parcelas encontradas: {response.data}")
+        return response.data
     except Exception as e:
-        print(f"Erro ao atualizar status da apólice {numero_apolice}: {e}")
-        return False
+        print(f"Erro ao buscar parcelas de hoje: {e}")
+        return []
 
 
-def buscar_parcela_atual(numero_apolice: str):
-    hoje = date.today()
+def buscar_parcela_atual(numero_apolice: str) -> Union[Dict[str, Any], None]:
+    """
+    Busca a próxima parcela pendente de uma apólice específica.
+    Retorna os dados da parcela + o link do PDF da apólice.
+    """
     try:
-        response = supabase.table('apolices').select("*").eq('numero_apolice', numero_apolice).single().execute()
-        apolice = response.data
-        if not apolice:
+        # 1. Achar o ID da apólice pelo número
+        res_apolice = supabase.table("apolices") \
+            .select("id, caminho_pdf_boletos, cliente") \
+            .eq("numero_apolice", numero_apolice) \
+            .execute()
+
+        if not res_apolice.data:
+            print(f"Apólice {numero_apolice} não encontrada.")
             return None
-        inicio_vigencia_str = apolice.get('data_inicio_vigencia')
-        qtd_parcelas = apolice.get('quantidade_parcelas')
-        dia_vencimento_padrao = apolice.get('dia_vencimento')
-        inicio_vigencia = date.fromisoformat(inicio_vigencia_str)
-        for i in range(1, int(qtd_parcelas) + 1):
-            vencimento_calculado = None
-            if i == 1:
-                vencimento_calculado = adicionar_dias_uteis(inicio_vigencia, 5)
-            else:
-                data_base_parcela = inicio_vigencia + relativedelta(months=i - 1)
-                try:
-                    vencimento_calculado = data_base_parcela.replace(day=int(dia_vencimento_padrao))
-                except ValueError:
-                    ultimo_dia_mes = (data_base_parcela.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(
-                        days=1)
-                    vencimento_calculado = ultimo_dia_mes
-            if vencimento_calculado >= hoje - timedelta(days=30):
-                apolice['data_vencimento_atual'] = vencimento_calculado
-                return apolice
+
+        apolice_data = res_apolice.data[0]
+        apolice_id = apolice_data['id']
+
+        # 2. Achar a primeira parcela pendente dessa apólice (ordenada por vencimento)
+        # Usamos gte (maior ou igual) hoje para pegar a próxima válida
+        hoje = date.today().isoformat()
+
+        res_parcela = supabase.table("parcelas") \
+            .select("*") \
+            .eq("apolice_id", apolice_id) \
+            .eq("status", "Pendente") \
+            .gte("data_vencimento", hoje) \
+            .order("data_vencimento") \
+            .limit(1) \
+            .execute()
+
+        # Se não achou futura, tenta pegar qualquer pendente (pode estar atrasada)
+        if not res_parcela.data:
+            res_parcela = supabase.table("parcelas") \
+                .select("*") \
+                .eq("apolice_id", apolice_id) \
+                .eq("status", "Pendente") \
+                .order("data_vencimento") \
+                .limit(1) \
+                .execute()
+
+        if res_parcela.data:
+            dados = res_parcela.data[0]
+            # Injeta os dados da apólice junto para facilitar
+            dados['caminho_pdf_boletos'] = apolice_data.get('caminho_pdf_boletos')
+            dados['data_vencimento_atual'] = dados['data_vencimento']
+            dados['apolices'] = {'cliente': apolice_data['cliente']}
+            return dados
+
         return None
+
     except Exception as e:
         print(f"Erro ao buscar parcela atual para apólice {numero_apolice}: {e}")
         return None
 
 
-def baixar_pdf_bytes(caminho_pdf: str) -> bytes:
+def atualizar_status_pagamento(numero_apolice: str, data_vencimento: date) -> bool:
+    """Dá baixa em uma parcela específica."""
     try:
-        BUCKET_NAME = "moreiraseg-apolices-pdfs-2025"
-        response = supabase.storage.from_(BUCKET_NAME).download(caminho_pdf)
-        return response
+        # Precisa achar o ID da apólice primeiro
+        res_apolice = supabase.table("apolices").select("id").eq("numero_apolice", numero_apolice).execute()
+        if not res_apolice.data: return False
+
+        apolice_id = res_apolice.data[0]['id']
+
+        data_str = data_vencimento.isoformat() if isinstance(data_vencimento, date) else data_vencimento
+
+        response = supabase.table("parcelas") \
+            .update({"status": "Pago", "data_pagamento": date.today().isoformat()}) \
+            .eq("apolice_id", apolice_id) \
+            .eq("data_vencimento", data_str) \
+            .execute()
+
+        return len(response.data) > 0
     except Exception as e:
-        print(f"Erro ao baixar PDF do Supabase Storage: {e}")
-        return None
-
-
-def buscar_todas_apolices():
-    """Busca todas as apólices para exibição no dashboard."""
-    try:
-        response = supabase.table('apolices').select("*").order('id', desc=True).execute()
-        return response.data
-    except Exception as e:
-        print(f"Erro ao buscar todas as apólices: {e}")
-        return []
-
-
-def buscar_todas_as_parcelas_pendentes():
-    """Busca em todas as apólices e gera uma lista completa de todas as parcelas pendentes."""
-    print("Buscando todas as parcelas pendentes...")
-    try:
-        # --- ATENÇÃO: Esta função parece usar a lógica antiga (calculada).
-        # --- A nova função `buscar_parcelas_vencendo_hoje` consulta a tabela `parcelas`
-        # --- Esta função `buscar_cobrancas_boleto_do_dia` consulta `apolices`
-        # --- Mantendo sua lógica original intacta ---
-        response = supabase.table('apolices').select("*").ilike('tipo_cobranca', '%boleto%').execute()
-        if not response.data:
-            return []
-        lista_de_parcelas = []
-        for apolice in response.data:
-            inicio_vigencia_str = apolice.get('data_inicio_vigencia')
-            qtd_parcelas = apolice.get('quantidade_parcelas')
-            dia_vencimento_padrao = apolice.get('dia_vencimento')
-            if not all([inicio_vigencia_str, qtd_parcelas, dia_vencimento_padrao]):
-                continue
-            inicio_vigencia = date.fromisoformat(inicio_vigencia_str)
-            for i in range(1, int(qtd_parcelas) + 1):
-                vencimento_calculado = None
-                if i == 1:
-                    vencimento_calculado = adicionar_dias_uteis(inicio_vigencia, 5)
-                else:
-                    data_base_parcela = inicio_vigencia + relativedelta(months=1)
-                    vencimento_calculado = data_base_parcela + relativedelta(months=i - 2)
-                    try:
-                        vencimento_calculado = vencimento_calculado.replace(day=int(dia_vencimento_padrao))
-                    except ValueError:
-                        ultimo_dia_mes = (vencimento_calculado.replace(day=28) + timedelta(days=4)).replace(
-                            day=1) - timedelta(days=1)
-                        vencimento_calculado = ultimo_dia_mes
-                chave_status = f"status_pagamento_{vencimento_calculado.strftime('%m_%Y')}"
-                status_parcela = apolice.get(chave_status, 'Pendente')
-                if status_parcela == 'Pendente':
-                    parcela_info = {
-                        'cliente': apolice.get('cliente'),
-                        'numero_apolice': apolice.get('numero_apolice'),
-                        'numero_parcela': i,
-                        'data_vencimento': vencimento_calculado,
-                        'valor': apolice.get('valor_parcela')
-                    }
-                    lista_de_parcelas.append(parcela_info)
-        return lista_de_parcelas
-    except Exception as e:
-        print(f"Erro ao buscar todas as parcelas pendentes: {e}")
-        return []
+        print(f"Erro ao atualizar pagamento: {e}")
+        return False
 
 
 def get_apolices(search_term=None):
-    """Busca apólices, converte as datas corretamente e calcula a data final de vigência."""
-    try:
-        query = supabase.table('apolices').select("*").order('id', desc=True)
-        if search_term:
-            ilike_term = f"%{search_term}%"
-            query = query.or_(f"numero_apolice.ilike.{ilike_term},cliente.ilike.{ilike_term},placa.ilike.{ilike_term}")
+    """Busca apólices para o painel (função legado do app.py)."""
+    query = supabase.table('apolices').select('*')
+    if search_term:
+        query = query.or_(
+            f"numero_apolice.ilike.%{search_term}%,cliente.ilike.%{search_term}%,placa.ilike.%{search_term}%")
 
-        response = query.execute()
+    response = query.execute()
+
+    import pandas as pd  # Import local para não quebrar scripts leves
+    if response.data:
         df = pd.DataFrame(response.data)
+        # Recalcula dias restantes
+        df['data_final_de_vigencia'] = pd.to_datetime(df['data_inicio_vigencia']) + pd.to_timedelta(365, unit='D')
+        df['dias_restantes'] = (df['data_final_de_vigencia'].dt.date - date.today()).apply(lambda x: x.days)
 
-        if not df.empty:
-            df['data_inicio_vigencia'] = pd.to_datetime(df['data_inicio_vigencia']).dt.date
-            df['data_final_de_vigencia'] = df['data_inicio_vigencia'].apply(
-                lambda x: x + relativedelta(years=1) if pd.notnull(x) else None)
-            today = date.today()
-            df['dias_restantes'] = (pd.to_datetime(df['data_final_de_vigencia']) - pd.to_datetime(today)).dt.days
-
-            def define_prioridade(dias):
-                if pd.isna(dias) or dias < 0: return '⚪ Expirada'
-                if dias <= 15:
-                    return '🔥 Urgente'
-                elif dias <= 30:
-                    return '⚠️ Alta'
-                elif dias <= 60:
-                    return '⚠️ Média'
-                else:
-                    return '✅ Baixa'
-
-            df['prioridade'] = df['dias_restantes'].apply(define_prioridade)
-        return df
-    except Exception as e:
-        print(f"Erro ao carregar apólices: {e}")
-        return pd.DataFrame()
-
-
-# --- NOVAS FUNÇÕES PARA O MÓDULO DE SINISTRO ---
-
-def get_sinistros():
-    """Busca todos os sinistros cadastrados."""
-    try:
-        response = supabase.table('sinistros').select("*").order('data_ultima_atualizacao', desc=True).execute()
-        if response.data:
-            return pd.DataFrame(response.data)
-        return pd.DataFrame()
-    except Exception as e:
-        print(f"Erro ao carregar os sinistros: {e}")
-        return pd.DataFrame()
-
-
-def add_historico_sinistro(sinistro_id, usuario_email, status_anterior, status_novo, observacao=""):
-    """Adiciona um registro de ação na tabela 'historico_sinistros'."""
-    try:
-        supabase.table('historico_sinistros').insert({
-            'sinistro_id': sinistro_id,
-            'usuario': usuario_email,
-            'status_anterior': status_anterior,
-            'status_novo': status_novo,
-            'observacao': observacao
-        }).execute()
-    except Exception as e:
-        print(f"⚠️ Não foi possível registrar a atualização do sinistro no histórico: {e}")
-
-
-# --- INÍCIO DA ALTERAÇÃO: NOVA FUNÇÃO PARA O AGENTE DE IA ---
-
-def buscar_parcelas_vencendo_hoje():
-    """
-    Busca no Supabase todas as parcelas com vencimento hoje que estão pendentes.
-    Junta os dados da apólice (cliente e contato) para o envio da mensagem.
-    """
-    if not supabase:
-        return "Erro: Conexão com Supabase não inicializada."
-
-    hoje_iso = date.today().isoformat()
-    print(f"Buscando parcelas vencendo hoje: {hoje_iso}")
-
-    try:
-        # Esta é a consulta correta:
-        # 1. Seleciona colunas da 'parcelas' (valor, numero_parcela, data_vencimento)
-        # 2. Seleciona colunas da 'apolices' (cliente, contato, numero_apolice)
-        # 3. Onde a data_vencimento é hoje E o status é 'Pendente'
-        response = supabase.table("parcelas").select(
-            "valor, numero_parcela, data_vencimento, apolices!inner(cliente, contato, numero_apolice)"
-        ).eq(
-            "data_vencimento", hoje_iso
-        ).eq(
-            "status", "Pendente"
-        ).execute()
-
-        print(f"Parcelas encontradas: {response.data}")
-        return response.data
-
-    except Exception as e:
-        print(f"Erro ao buscar parcelas vencendo hoje: {e}")
-        return f"Erro ao executar a busca: {e}"
-
-
-# --- FIM DA ALTERAÇÃO ---
-
-
-# --- BLOCO DE MANUTENÇÃO ADMINISTRATIVA (VERSÃO 2 - ATUALIZAÇÃO DIRETA) ---
-# Este código SÓ será executado se você rodar este arquivo diretamente.
-# Ex: python utils/supabase_client.py
-if __name__ == "__main__":
-    print("--- EXECUTANDO SCRIPT DE MANUTENÇÃO ADMIN ---")
-
-    # Recarrega o .env para pegar as novas chaves
-    load_dotenv()
-
-    # Pega as chaves de ADMIN do arquivo .env
-    SERVICE_KEY = os.environ.get("SUPABASE_SERVICE_KEY")
-    ADMIN_ID = os.environ.get("ADMIN_USER_ID")
-    ADMIN_URL = os.environ.get("SUPABASE_URL")
-
-    if not all([SERVICE_KEY, ADMIN_ID, ADMIN_URL]):
-        print("ERRO: As variáveis SUPABASE_SERVICE_KEY ou ADMIN_USER_ID não foram encontradas no .env.")
-    else:
-        print("Conectando ao Supabase com privilégios de administrador...")
-        try:
-            # Cria um cliente SEPARADO E SEGURO apenas para esta tarefa
-            supabase_admin: Client = create_client(ADMIN_URL, SERVICE_KEY)
-
-            print(f"Atualizando metadados para o usuário: {ADMIN_ID} (Método Direto de DB)")
-
-            # Define os novos metadados que queremos salvar
-            new_metadata = {
-                "perfil": "admin",
-                "nome_completo": "Administrador Principal"
-            }
-
-            # --- ABORDAGEM CORRIGIDA: ATUALIZAR O BANCO DE DADOS DIRETAMENTE ---
-            # A chave 'service_role' bypassa o RLS e pode escrever em qualquer tabela.
-            # Nós vamos atualizar a coluna 'raw_user_meta_data' na tabela 'users' do schema 'auth'.
-
-            response = supabase_admin.table('"auth"."users"').update(
-                {"raw_user_meta_data": new_metadata}
-            ).eq("id", ADMIN_ID).execute()
-
-            print("\n--- SUCESSO! ---")
-            print("Os metadados do usuário foram atualizados diretamente no banco de dados.")
-
-            if response.data:
-                user_updated = response.data[0]
-                print(f"Novo perfil: {user_updated['raw_user_meta_data'].get('perfil')}")
+        def definir_prioridade(dias):
+            if dias < 0:
+                return '⚪ Expirada'
+            elif dias <= 15:
+                return '🔥 Urgente'
+            elif dias <= 30:
+                return '⚠️ Alta'
+            elif dias <= 60:
+                return '⚠️ Média'
             else:
-                print("Atualização concluída. Verifique o painel do Supabase para confirmar.")
+                return '✅ Baixa'
 
-        except Exception as e:
-            print(f"\n--- ERRO DURANTE A ATUALIZAÇÃO (Método DB): {e} ---")
+        df['prioridade'] = df['dias_restantes'].apply(definir_prioridade)
+        return df
+    return pd.DataFrame()
+
+
+# --- NOVA FUNÇÃO DE DOWNLOAD ROBUSTA ---
+
+def baixar_pdf_bytes(caminho_ou_url: str) -> Union[bytes, None]:
+    """
+    Baixa o arquivo PDF.
+    Inteligente: Detecta se é uma URL pública (http) ou um caminho interno.
+    """
+    if not caminho_ou_url:
+        print("Erro: Caminho do PDF é vazio.")
+        return None
+
+    print(f"⬇️ Tentando baixar PDF de: {caminho_ou_url}")
+
+    try:
+        # CENÁRIO 1: É uma URL completa (Links Públicos gerados pelo seu App)
+        if caminho_ou_url.startswith("http"):
+            response = requests.get(caminho_ou_url, timeout=15)
+            if response.status_code == 200:
+                print("✅ Download via URL bem sucedido!")
+                return response.content
+            else:
+                print(f"❌ Erro ao baixar via URL. Status: {response.status_code}")
+                return None
+
+        # CENÁRIO 2: É um caminho interno do Bucket (caso antigo)
+        else:
+            bucket_name = "moreiraseg-apolices-pdfs-2025"  # Seu bucket padrão
+            data = supabase.storage.from_(bucket_name).download(caminho_ou_url)
+            print("✅ Download via Storage interno bem sucedido!")
+            return data
+
+    except Exception as e:
+        print(f"❌ Exceção ao baixar PDF: {e}")
+        return None
