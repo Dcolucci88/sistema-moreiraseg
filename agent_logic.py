@@ -2,6 +2,13 @@ import os
 import streamlit as st
 from datetime import date
 from dotenv import load_dotenv
+from utils.supabase_client import (
+    buscar_parcelas_vencendo_hoje,
+    atualizar_status_pagamento,
+    buscar_parcela_atual,
+    baixar_pdf_bytes,
+    buscar_apolice_inteligente
+)
 
 # Tenta importar o leitor de PDF, se falhar, o código trata depois
 try:
@@ -19,9 +26,9 @@ import sys  # Importado para o sys.exit()
 # Carrega variáveis de ambiente do .env, caso existam
 load_dotenv()
 
-# --- VERIFICAÇÃO DAS VARIÁVEIS DE AMBIENTE ---
+# --- VERIFICAÇÃO DAS VARIÁVEIS DE AMBIENTE (ALTERADO PARA OPENAI) ---
 print("Variáveis carregadas:")
-print(f"GEMINI_API_KEY: {'***' if os.environ.get('GEMINI_API_KEY') else 'NÃO ENCONTRADA'}")
+print(f"OPENAI_API_KEY: {'***' if os.environ.get('OPENAI_API_KEY') else 'NÃO ENCONTRADA'}")
 print(f"META_ACCESS_TOKEN: {'***' if os.environ.get('META_ACCESS_TOKEN') else 'NÃO ENCONTRADA'}")
 
 # --- 3. Memória (CONFIGURAÇÃO GLOBAL) ---
@@ -32,13 +39,13 @@ memory = ConversationBufferWindowMemory(
     k=5
 )
 
-# --- IMPORTAÇÕES ALTERNATIVAS - ABORDAGEM MAIS RECENTE ---
+# --- IMPORTAÇÕES DO MOTOR DE IA (ALTERADO PARA OPENAI) ---
 try:
-    from langchain_google_genai import ChatGoogleGenerativeAI
-
-    print("✓ ChatGoogleGenerativeAI importado")
+    from langchain_openai import ChatOpenAI
+    print("✓ ChatOpenAI importado")
 except ImportError as e:
-    print(f"✗ ChatGoogleGenerativeAI: {e}")
+    print(f"✗ ChatOpenAI: {e}")
+    print("Instale a biblioteca: pip install langchain-openai")
     sys.exit(1)
 
 # --- CORREÇÃO DE IMPORTAÇÃO (LangChain v0.2+) ---
@@ -54,7 +61,6 @@ except ImportError as e:
 
 try:
     from langchain_core.prompts import ChatPromptTemplate
-
     print("✓ ChatPromptTemplate importado")
 except ImportError as e:
     print(f"✗ ChatPromptTemplate: {e}")
@@ -62,66 +68,25 @@ except ImportError as e:
 
 try:
     from langchain.tools import tool
-
     print("✓ tool importado")
 except ImportError as e:
     print(f"✗ tool: {e}")
     sys.exit(1)
 
-# --- Importações de Utilitários (Assumimos que existem) ---
-try:
-    from utils.supabase_client import (
-        buscar_parcelas_vencendo_hoje,
-        atualizar_status_pagamento,
-        buscar_parcela_atual,
-        baixar_pdf_bytes
-    )
 
-    print("✓ Utils supabase_client importados")
-except ImportError:
-    print("ALERTA: utils/supabase_client não encontrado. Usando mocks para teste de unidade.")
+# --- 1. Definição das Ferramentas (MANTIDAS INTACTAS) ---
 
-    # --- MOCKS (DADOS DE TESTE) ---
-    MOCK_DADOS_VENCIMENTO = [
-        {
-            "valor": 450.75,
-            "numero_parcela": 3,
-            "data_vencimento": date.today().isoformat(),
-            "apolices": {
-                "cliente": "João da Silva",
-                "contato": "5511987654321",
-                "numero_apolice": "AP-10020",
-                "placa": "ABC-1234"
-            }
-        }
-    ]
-
-
-    def buscar_parcelas_vencendo_hoje() -> Union[List[Dict[str, Any]], str]:
-        return MOCK_DADOS_VENCIMENTO
-
-
-    def atualizar_status_pagamento(numero_apolice: str, data_vencimento: date) -> bool:
-        print(f"MOCK: Baixa de pagamento simulada para a apólice {numero_apolice}.")
-        return True
-
-
-    def buscar_parcela_atual(numero_apolice: str) -> Union[Dict[str, Any], None]:
-        if numero_apolice == "AP-10020":
-            return {
-                "caminho_pdf_boletos": "caminho/mock/joao_carnes.pdf",
-                "data_vencimento_atual": date.today().isoformat(),
-                "apolices": {"cliente": "João da Silva"}
-            }
-        return None
-
-
-    def baixar_pdf_bytes(caminho: str) -> Union[bytes, None]:
-        return b"%PDF-1.4\n%Caminho: " + caminho.encode(
-            'utf-8') + b"\n%Codigo de Barras: 12345.67890 12345.67890 12345.67890 1 1234\n%%EOF"
-
-
-# --- 1. Definição das Ferramentas ---
+@tool
+def descobrir_numero_apolice(termo_busca: str) -> str:
+    """
+    Use esta ferramenta quando o usuário informar apenas a PLACA ou o NOME do cliente
+    e você precisar descobrir o 'numero_apolice' para realizar outras tarefas.
+    Retorna uma lista de apólices encontradas.
+    """
+    resultados = buscar_apolice_inteligente(termo_busca)
+    if not resultados:
+        return "Não encontrei nenhuma apólice com esse nome ou placa."
+    return f"Encontrei estas apólices: {resultados}"
 
 @tool
 def buscar_clientes_com_vencimento_hoje() -> Union[List[Dict[str, Any]], str]:
@@ -233,14 +198,12 @@ def obter_codigo_de_barras_boleto(numero_apolice: str) -> str:
 
     pdf_bytes = baixar_pdf_bytes(caminho_pdf)
     if not pdf_bytes:
-        return f"Não foi possível baixar o carnê em PDF para a apólice {numero_apolice}."
+        return f"Não foi possível baixar o carnê em PDF (Link inválido ou arquivo movido)."
 
-    data_formatada = date.fromisoformat(data_vencimento).strftime('%d/%m/%Y') if isinstance(data_vencimento,
-                                                                                            str) else data_vencimento.strftime(
-        '%d/%m/%Y')
+    data_formatada = date.fromisoformat(data_vencimento).strftime('%d/%m/%Y') if isinstance(data_vencimento, str) else data_vencimento.strftime('%d/%m/%Y')
 
     codigo_barras = extrair_codigo_de_barras(pdf_bytes, data_formatada)
-    return codigo_barras if codigo_barras else "Não foi possível extrair o código de barras do PDF."
+    return codigo_barras if codigo_barras else "Não foi possível extrair o código de barras do PDF (Arquivo pode ser imagem)."
 
 
 @tool
@@ -268,8 +231,8 @@ def marcar_parcela_como_paga(numero_apolice: str) -> str:
         return f"Ocorreu um erro ao tentar registrar a baixa."
 
 
-# --- 2. Inicialização do Agente e LLM ---
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+# --- 2. Inicialização do Agente e LLM (AGORA COM OPENAI) ---
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 META_ACCESS_TOKEN = os.environ.get("META_ACCESS_TOKEN")
 
 llm = None
@@ -278,32 +241,36 @@ tools = [
     buscar_clientes_com_vencimento_hoje,
     enviar_lembrete_whatsapp,
     obter_codigo_de_barras_boleto,
-    marcar_parcela_como_paga
+    marcar_parcela_como_paga,
+    descobrir_numero_apolice
 ]
 
-if GEMINI_API_KEY and META_ACCESS_TOKEN and AGENT_IMPORTS_AVAILABLE:
+# Verifica a chave da OpenAI agora
+if OPENAI_API_KEY and META_ACCESS_TOKEN and AGENT_IMPORTS_AVAILABLE:
     try:
-        # Inicializa o LLM com o modelo atualizado
-        llm = ChatGoogleGenerativeAI(
-            model="gemini-flash-latest",
-            google_api_key=GEMINI_API_KEY,
-            temperature=0.1,
-            max_output_tokens=4096
+        # Inicializa o LLM com OpenAI (GPT-4o mini)
+        llm = ChatOpenAI(
+            model="gpt-4o-mini",
+            api_key=OPENAI_API_KEY,
+            temperature=0,  # 0 deixa ele mais preciso e menos criativo
+            max_tokens=4096
         )
 
         # Cria o prompt COM MEMÓRIA
         prompt = ChatPromptTemplate.from_messages([
-            ("system", """Você é um assistente de IA da MOREIRASEG CORRETORA DE SEGUROS.
-Sua personalidade é Profissional, Confiável e Prestativa.
-Sua função é ajudar na gestão de cobranças, consultar apólices e interagir com o usuário.
+            ("system", """Você é um Agente de IA da MOREIRASEG CORRETORA DE SEGUROS.
+        Sua personalidade é Profissional, Confiável e Prestativa.
 
-### FLUXO DE TRABALHO DE COBRANÇA:
-1. Buscar parcelas vencendo hoje.
-2. Para cada parcela, enviar lembrete via WhatsApp.
+        ### SEUS SUPER-PODERES (FERRAMENTAS):
+        1. Se o usuário der uma **PLACA** ou **NOME**, use a ferramenta `descobrir_numero_apolice` PRIMEIRO para achar o número da apólice.
+        2. Com o número da apólice em mãos, use a ferramenta correta (ex: `obter_codigo_de_barras_boleto`).
 
-### OUTRAS TAREFAS:
-- Código de barras: use `obter_codigo_de_barras_boleto`
-- Baixa de pagamento: use `marcar_parcela_como_paga`"""),
+        ### FLUXO DE COBRANÇA:
+        1. Buscar parcelas vencendo hoje (`buscar_clientes_com_vencimento_hoje`).
+        2. Para cada parcela, enviar WhatsApp (`enviar_lembrete_whatsapp`).
+
+        Não peça confirmação se a busca retornar apenas um resultado óbvio. Execute a tarefa solicitada imediatamente.
+        """),
 
             # AQUI ENTRA O HISTÓRICO DA CONVERSA (CRUCIAL PARA MEMÓRIA)
             MessagesPlaceholder(variable_name="chat_history"),
@@ -319,19 +286,19 @@ Sua função é ajudar na gestão de cobranças, consultar apólices e interagir
         agent_executor = AgentExecutor(
             agent=agent,
             tools=tools,
-            memory=memory,  # <--- OBRIGATÓRIO: Passando a memória definida lá em cima
+            memory=memory,  # <--- Passando a memória definida lá em cima
             verbose=True,
             handle_parsing_errors=True,
             max_iterations=10
         )
 
-        print("✓ Agente inicializado com sucesso (Gemini 2.0 Flash + Memória)")
+        print("✓ Agente inicializado com sucesso (GPT-4o mini + Memória)")
 
     except Exception as e:
-        print(f"✗ Erro ao inicializar agente: {e}")
+        print(f"✗ Erro ao inicializar agente OpenAI: {e}")
         agent_executor = None
 else:
-    print("ALERTA: Agente desabilitado. Verifique as chaves API no .env ou Secrets.")
+    print("ALERTA: Agente desabilitado. Verifique as chaves OPENAI_API_KEY no .env ou Secrets.")
 
 
 # --- 5. Função Principal ---

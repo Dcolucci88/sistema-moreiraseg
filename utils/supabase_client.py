@@ -31,16 +31,19 @@ if not SUPABASE_URL:
     SUPABASE_URL = os.environ.get("SUPABASE_URL")
     SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 
-# 3. Cria o cliente
+# 3. Tenta criar o cliente APENAS se as chaves foram encontradas
 if SUPABASE_URL and SUPABASE_KEY:
     try:
         supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+        # print("Cliente Supabase inicializado.")
     except Exception as e:
+        # Se a criação falhar, supabase continuará como None
         print(f"Erro ao criar cliente Supabase: {e}")
         supabase = None
 else:
+    # Se as chaves não foram encontradas, supabase permanece None
+    # print("Chaves do Supabase não encontradas. Cliente não inicializado.")
     pass
-
 
 # ============================================================
 # 2. FUNÇÕES ATUALIZADAS (PARA O AGENTE E PDF FUNCIONAREM)
@@ -187,6 +190,28 @@ def atualizar_status_pagamento(numero_apolice: str, data_vencimento: date) -> bo
         print(f"Erro update: {e}")
         return False
 
+
+def buscar_apolice_inteligente(termo: str) -> List[Dict[str, Any]]:
+    """
+    Busca apólices pesquisando por PLACA ou NOME do cliente.
+    Usada pelo Agente de IA para descobrir o número da apólice.
+    """
+    if not supabase: return []
+    print(f"🔍 IA Buscando apólice por: {termo}")
+
+    try:
+        # Remove espaços extras
+        termo_limpo = termo.strip()
+
+        # Busca por PLACA ou CLIENTE (case insensitive)
+        response = supabase.table('apolices').select(
+            "cliente, numero_apolice, placa, seguradora"
+        ).or_(f"placa.ilike.%{termo_limpo}%,cliente.ilike.%{termo_limpo}%").limit(5).execute()
+
+        return response.data
+    except Exception as e:
+        print(f"Erro na busca inteligente: {e}")
+        return []
 
 # ============================================================
 # 3. FUNÇÕES LEGADO (MANTIDAS PARA O DASHBOARD NÃO QUEBRAR)

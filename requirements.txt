@@ -7,23 +7,25 @@ python-dotenv
 requests
 schedule
 
-# --- INTELIGÊNCIA ARTIFICIAL (VERSÕES CORRIGIDAS) ---
-# Estas versões são OBRIGATÓRIAS para não dar erro de importação
+streamlit
+pandas
+supabase
+python-dateutil
+python-dotenv
+requests
+schedule
 langchain==0.3.7
 langchain-community==0.3.7
 langchain-core==0.3.19
-langchain-google-genai==2.0.7
 langchain-text-splitters==0.3.2
-
-# --- INTEGRAÇÕES GOOGLE ---
+langchain-openai>=0.1.20
+langchain-google-genai==2.0.7
+pypdf>=4.0.0
+chromadb>=0.5.0
+faiss-cpu
 google-auth
 google-auth-oauthlib
 google-ai-generativelanguage
-
-# --- UTILITÁRIOS E DADOS ---
-chromadb>=0.5.0
-pypdf>=4.0.0
-faiss-cpu
 fastapi
 uvicorn
 pydantic
