@@ -346,7 +346,7 @@ if OPENAI_API_KEY and META_ACCESS_TOKEN and AGENT_IMPORTS_AVAILABLE:
                 **3. CRITÉRIO DE DESEMPATE (PLACA DUPLICADA):**
                    - Se encontrar mais de uma apólice para a mesma placa, verifique o status.
                    - **IGNORE** apólices com atraso superior a 60 dias ou status "Cancelado".
-                   - **FOQUE APENAS** na apólice mais recente/vigente dentro de 365 dia.
+                   - **FOQUE APENAS** na apólice mais recente/vigente.
                    - Não liste a apólice antiga para o usuário, finja que ela não existe para evitar confusão.
             
 
