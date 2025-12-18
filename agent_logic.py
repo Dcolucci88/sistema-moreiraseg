@@ -172,39 +172,79 @@ def enviar_lembrete_whatsapp(numero_telefone: str, nome_cliente: str, data_venci
         return f"Exceção ao enviar mensagem: {e}"
 
 
+# --- FERRAMENTA 1: TRIAGEM ---
+@tool
+def obter_contato_especialista(intencao_usuario: str) -> str:
+    """Retorna o contato do especialista baseado no assunto (RCO, Sinistro, Auto)."""
+    intencao = intencao_usuario.lower()
+    if "rco" in intencao or "prorroga" in intencao or "ônibus" in intencao:
+        return "Para RCO e Prorrogações, fale com a **Leidiane**: (62) 99999-9999."
+    elif "sinistro" in intencao or "bati" in intencao or "roubo" in intencao:
+        return "Para Sinistros, fale urgente com a **Thuanny**: (62) 98888-8888."
+    else:
+        return "Para Auto, Vida e outros, fale com a **Mara**: (62) 97777-7777."
+
+
+# --- FERRAMENTA 2: BOLETO COM REGRAS DE NEGÓCIO ---
 @tool
 def obter_codigo_de_barras_boleto(numero_apolice: str) -> str:
-    """
-    Obtém o código de barras do boleto atual para uma apólice específica lendo o PDF.
-    """
-    print(f"EXECUTANDO FERRAMENTA: obter_codigo_de_barras_boleto para a apólice {numero_apolice}")
+    """Obtém código de barras aplicando regras de RCO (Prazos Essor/Kovr)."""
 
-    # Verifica se a biblioteca pypdf está instalada (via import do utils)
-    if extrair_codigo_de_barras is None and os.environ.get("MOCK_WHATSAPP") != "True":
-        return "Erro: A biblioteca de leitura de PDF não está instalada. Contacte o suporte."
-
-    if os.environ.get("MOCK_WHATSAPP") == "True":
-        return "MOCK: O código de barras simulado é 12345.67890 12345.67890 12345.67890 1 1234."
-
+    # 1. Busca dados
     parcela = buscar_parcela_atual(numero_apolice)
-    if not parcela:
-        return f"Não foi possível encontrar os dados da apólice {numero_apolice}."
+    if not parcela: return f"Apólice {numero_apolice} não encontrada."
 
     caminho_pdf = parcela.get('caminho_pdf_boletos')
-    data_vencimento = parcela.get('data_vencimento_atual')
+    data_vencimento_str = parcela.get('data_vencimento_atual')
+    # Tenta pegar seguradora (se não tiver, assume genérico)
+    nome_seguradora = str(parcela.get('seguradora', '')).lower()
 
-    if not caminho_pdf or not data_vencimento:
-        return f"Dados de PDF ou vencimento faltando para a apólice {numero_apolice}."
+    if not caminho_pdf: return "PDF do boleto não encontrado."
 
-    pdf_bytes = baixar_pdf_bytes(caminho_pdf)
-    if not pdf_bytes:
-        return f"Não foi possível baixar o carnê em PDF (Link inválido ou arquivo movido)."
+    # 2. Cálculos
+    hoje = date.today()
+    if isinstance(data_vencimento_str, str):
+        data_vencimento = date.fromisoformat(data_vencimento_str)
+    else:
+        data_vencimento = data_vencimento_str
 
-    data_formatada = date.fromisoformat(data_vencimento).strftime('%d/%m/%Y') if isinstance(data_vencimento, str) else data_vencimento.strftime('%d/%m/%Y')
+    dias_atraso = (hoje - data_vencimento).days
 
-    codigo_barras = extrair_codigo_de_barras(pdf_bytes, data_formatada)
-    return codigo_barras if codigo_barras else "Não foi possível extrair o código de barras do PDF (Arquivo pode ser imagem)."
+    # 3. Definição de Tolerância
+    tolerancia = 0
+    if "essor" in nome_seguradora:
+        tolerancia = 10
+    elif "kovr" in nome_seguradora:
+        tolerancia = 5
 
+    # 4. Regras
+    # Regra Crítica (> 20 dias)
+    if dias_atraso > 20:
+        return f"🚨 URGENTE: Atraso de {dias_atraso} dias. Risco de cancelamento. Fale com a LEIDIANE imediatamente."
+
+    # Regra de Prorrogação (Passou da tolerância)
+    if dias_atraso > tolerancia:
+        return f"⚠️ Boleto vencido há {dias_atraso} dias (Limite: {tolerancia}). Necessário prorrogar. Fale com a LEIDIANE."
+
+    # Regra de Cobertura (Atrasado mas aceitável)
+    aviso_cobertura = ""
+    if dias_atraso > 0:
+        aviso_cobertura = f"\n\n⚠️ ATENÇÃO: Você está SEM COBERTURA até a baixa do pagamento."
+
+    # Extração do Código
+    if extrair_codigo_de_barras:
+        pdf_bytes = baixar_pdf_bytes(caminho_pdf)
+        if pdf_bytes:
+            # Formata data para dd/mm/aaaa
+            data_fmt = data_vencimento.strftime('%d/%m/%Y')
+            codigo = extrair_codigo_de_barras(pdf_bytes, data_fmt)
+            if codigo:
+                return f"Código de Barras:{aviso_cobertura}\n\n{codigo}"
+
+    return "Não consegui ler o código, mas o boleto está válido (verifique o PDF)."
+
+
+# --- ATENÇÃO: AQUI EU REMOVI A SEGUNDA VERSÃO REPETIDA DA FUNÇÃO ACIMA ---
 
 @tool
 def marcar_parcela_como_paga(numero_apolice: str) -> str:
@@ -237,12 +277,15 @@ META_ACCESS_TOKEN = os.environ.get("META_ACCESS_TOKEN")
 
 llm = None
 agent_executor = None
+
+# LISTA DE FERRAMENTAS CORRIGIDA (Adicionei a obter_contato_especialista)
 tools = [
     buscar_clientes_com_vencimento_hoje,
     enviar_lembrete_whatsapp,
     obter_codigo_de_barras_boleto,
     marcar_parcela_como_paga,
-    descobrir_numero_apolice
+    descobrir_numero_apolice,
+    obter_contato_especialista  # <--- FALTAVA ISSO AQUI
 ]
 
 # Verifica a chave da OpenAI agora
@@ -252,27 +295,62 @@ if OPENAI_API_KEY and META_ACCESS_TOKEN and AGENT_IMPORTS_AVAILABLE:
         llm = ChatOpenAI(
             model="gpt-4o-mini",
             api_key=OPENAI_API_KEY,
-            temperature=0,  # 0 deixa ele mais preciso e menos criativo
+            temperature=0,
             max_tokens=4096
         )
 
-        # Cria o prompt COM MEMÓRIA
+        # DEFINIÇÃO DO CÉREBRO (PROMPT DO SISTEMA ATUALIZADO)
         prompt = ChatPromptTemplate.from_messages([
-            ("system", """Você é um Agente de IA da MOREIRASEG CORRETORA DE SEGUROS.
-        Sua personalidade é Profissional, Confiável e Prestativa.
+            ("system", """Você é o Agente Inteligente da CORRETORA MOREIRASEG.
+                Sua personalidade é Profissional, Resolutiva e Clara.
 
-        ### SEUS SUPER-PODERES (FERRAMENTAS):
-        1. Se o usuário der uma **PLACA** ou **NOME**, use a ferramenta `descobrir_numero_apolice` PRIMEIRO para achar o número da apólice.
-        2. Com o número da apólice em mãos, use a ferramenta correta (ex: `obter_codigo_de_barras_boleto`).
+                ### 🚀 SEUS SUPER-PODERES (REGRA DE OURO):
+                1. **BUSCA POR PLACA:** Se o usuário der uma **PLACA**, use a ferramenta `descobrir_numero_apolice` **IMEDIATAMENTE** para achar o número da apólice.
+                2. Somente com o número da apólice em mãos, use as outras ferramentas.
 
-        ### FLUXO DE COBRANÇA:
-        1. Buscar parcelas vencendo hoje (`buscar_clientes_com_vencimento_hoje`).
-        2. Para cada parcela, enviar WhatsApp (`enviar_lembrete_whatsapp`).
+                ### ⚠️ IMPORTANTE:
+                Se o usuário fornecer um NOME, explique educadamente que devido a homônimos, você precisa da **PLACA** ou do **CPF** para localizar o seguro com segurança.
 
-        Não peça confirmação se a busca retornar apenas um resultado óbvio. Execute a tarefa solicitada imediatamente.
-        """),
+                ---
 
-            # AQUI ENTRA O HISTÓRICO DA CONVERSA (CRUCIAL PARA MEMÓRIA)
+                ### 🧠 REGRAS DE NEGÓCIO (MEMORIZE ISTO):
+
+                **1. SOBRE PAGAMENTOS ATRASADOS (RCO):**
+                   - O segurado fica **SEM COBERTURA** a partir do primeiro dia de atraso até a baixa bancária. AVISO OBRIGATÓRIO.
+                   - **Seguradora ESSOR:** Aceita pagamento do MESMO boleto até **10 dias corridos** após vencimento.
+                   - **Seguradora KOVR:** Aceita pagamento do MESMO boleto até **5 dias corridos** após vencimento.
+                   - **Cancelamento:** Após **20 dias** de atraso, as seguradoras iniciam o cancelamento da apólice.
+                   - **Prorrogação:** Se passar do prazo (5 ou 10 dias), o cliente precisa de um NOVO boleto (Prorrogação). Não é possível prorrogar o mesmo boleto duas vezes.
+
+                **2. SOBRE A EQUIPE (TRIAGEM):**
+                   Use a ferramenta `obter_contato_especialista` para direcionar:
+                   - **LEIDIANE:** Assuntos de RCO, Prorrogação de boleto vencido, Renovação de Frota.
+                   - **THUANNY:** Sinistro (Batidas, Roubos, Acidentes).
+                   - **MARA:** Seguros de Automóvel (Carro/Moto), Vida, Residencial, Escolar e APP.
+
+                ---
+
+                ### 🤖 COMO AGIR EM CADA SITUAÇÃO:
+
+                **SITUAÇÃO 1: Cliente pede boleto (via Placa)**
+                - Passo 1: Use `descobrir_numero_apolice`.
+                - Passo 2: Verifique a data de vencimento.
+                - Passo 3: Se estiver no prazo (Dia ou Tolerância), use `obter_codigo_de_barras_boleto`.
+                  *Se for atrasado na tolerância, avise que está SEM COBERTURA.*
+
+                **SITUAÇÃO 2: Boleto Vencido (Fora do Prazo ou > 20 dias)**
+                - NÃO envie código de barras antigo se a ferramenta informar que expirou.
+                - Encaminhe para a **Leidiane** (Prorrogação).
+                - Se > 20 dias, alerte sobre CANCELAMENTO.
+
+                **SITUAÇÃO 3: Triagem Geral**
+                - "Bati o carro" -> Thuanny.
+                - "Cotar seguro novo" -> Mara (Auto) ou Leidiane (RCO).
+
+                Não invente dados. Se não achar a placa, pergunte novamente.
+                """),
+
+            # AQUI ENTRA O HISTÓRICO DA CONVERSA
             MessagesPlaceholder(variable_name="chat_history"),
 
             ("human", "{input}"),
@@ -286,7 +364,7 @@ if OPENAI_API_KEY and META_ACCESS_TOKEN and AGENT_IMPORTS_AVAILABLE:
         agent_executor = AgentExecutor(
             agent=agent,
             tools=tools,
-            memory=memory,  # <--- Passando a memória definida lá em cima
+            memory=memory,
             verbose=True,
             handle_parsing_errors=True,
             max_iterations=10
@@ -322,4 +400,5 @@ if __name__ == '__main__':
     print("TESTE LOCAL INICIADO")
     # Simula conversa
     print(executar_agente("Olá, quem é você?"))
-    print(executar_agente("O que você pode fazer?"))
+    # Teste de triagem
+    print(executar_agente("Bati meu carro, o que faço?"))
