@@ -188,7 +188,7 @@ def obter_contato_especialista(intencao_usuario: str) -> str:
 # --- FERRAMENTA 2: BOLETO COM REGRAS DE NEGÓCIO ---
 @tool
 def obter_codigo_de_barras_boleto(numero_apolice: str) -> str:
-    """Obtém código de barras aplicando regras de RCO (Prazos Essor/Kovr)."""
+    """Obtém código de barras aplicando regras de RCO e formatando para cópia fácil."""
 
     # 1. Busca dados
     parcela = buscar_parcela_atual(numero_apolice)
@@ -201,7 +201,7 @@ def obter_codigo_de_barras_boleto(numero_apolice: str) -> str:
 
     if not caminho_pdf: return "PDF do boleto não encontrado."
 
-    # 2. Cálculos
+    # 2. Cálculos de Data
     hoje = date.today()
     if isinstance(data_vencimento_str, str):
         data_vencimento = date.fromisoformat(data_vencimento_str)
@@ -217,29 +217,44 @@ def obter_codigo_de_barras_boleto(numero_apolice: str) -> str:
     elif "kovr" in nome_seguradora:
         tolerancia = 5
 
-    # 4. Regras
-    # Regra Crítica (> 20 dias)
+    # 4. Regras de Negócio
+
+    # --- Regra Crítica (> 20 dias) ---
     if dias_atraso > 20:
-        return f"🚨 URGENTE: Atraso de {dias_atraso} dias. Risco de cancelamento. Fale com a LEIDIANE imediatamente."
+        return (
+            f"🚨 **URGENTE: RISCO DE CANCELAMENTO**\n"
+            f"O boleto venceu há {dias_atraso} dias. Fale com a LEIDIANE imediatamente para tentar salvar a apólice."
+        )
 
-    # Regra de Prorrogação (Passou da tolerância)
+    # --- Regra de Prorrogação (Passou da tolerância) ---
     if dias_atraso > tolerancia:
-        return f"⚠️ Boleto vencido há {dias_atraso} dias (Limite: {tolerancia}). Necessário prorrogar. Fale com a LEIDIANE."
+        nome_exibicao = "Essor" if "essor" in nome_seguradora else "Kovr"
+        return (
+            f"⚠️ **Boleto Vencido há {dias_atraso} dias.**\n"
+            f"A {nome_exibicao} só aceita até {tolerancia} dias. O código antigo não funciona mais.\n"
+            f"Solicite a **Prorrogação** (novo boleto) com a LEIDIANE."
+        )
 
-    # Regra de Cobertura (Atrasado mas aceitável)
+    # --- Regra de Cobertura (Atrasado mas aceitável) ---
     aviso_cobertura = ""
     if dias_atraso > 0:
-        aviso_cobertura = f"\n\n⚠️ ATENÇÃO: Você está SEM COBERTURA até a baixa do pagamento."
+        aviso_cobertura = f"\n\n⚠️ **ATENÇÃO:** Você está SEM COBERTURA até a baixa bancária do pagamento."
 
-    # Extração do Código
+    # 5. Extração e Formatação (O Pulo do Gato para o Copiar/Colar)
     if extrair_codigo_de_barras:
         pdf_bytes = baixar_pdf_bytes(caminho_pdf)
         if pdf_bytes:
             # Formata data para dd/mm/aaaa
             data_fmt = data_vencimento.strftime('%d/%m/%Y')
             codigo = extrair_codigo_de_barras(pdf_bytes, data_fmt)
+
             if codigo:
-                return f"Código de Barras:{aviso_cobertura}\n\n{codigo}"
+                # As crases triplas ```text criam a caixa com botão de cópia
+                return (
+                    f"Aqui está o código de barras para o pagamento:{aviso_cobertura}\n\n"
+                    f"```text\n{codigo}\n```\n\n"
+                    f"📋 _(Clique no ícone acima para copiar)_"
+                )
 
     return "Não consegui ler o código, mas o boleto está válido (verifique o PDF)."
 
@@ -326,7 +341,14 @@ if OPENAI_API_KEY and META_ACCESS_TOKEN and AGENT_IMPORTS_AVAILABLE:
                    Use a ferramenta `obter_contato_especialista` para direcionar:
                    - **LEIDIANE:** Assuntos de RCO, Prorrogação de boleto vencido, Renovação de Frota.
                    - **THUANNY:** Sinistro (Batidas, Roubos, Acidentes).
-                   - **MARA:** Seguros de Automóvel (Carro/Moto), Vida, Residencial, Escolar e APP.
+                   - **MARA:** Seguros de Automóvel (Carro/Moto), Vida, Residencial, Escolar e APP.             
+                   
+                **3. CRITÉRIO DE DESEMPATE (PLACA DUPLICADA):**
+                   - Se encontrar mais de uma apólice para a mesma placa, verifique o status.
+                   - **IGNORE** apólices com atraso superior a 60 dias ou status "Cancelado".
+                   - **FOQUE APENAS** na apólice mais recente/vigente dentro de 365 dia.
+                   - Não liste a apólice antiga para o usuário, finja que ela não existe para evitar confusão.
+            
 
                 ---
 
@@ -334,8 +356,9 @@ if OPENAI_API_KEY and META_ACCESS_TOKEN and AGENT_IMPORTS_AVAILABLE:
 
                 **SITUAÇÃO 1: Cliente pede boleto (via Placa)**
                 - Passo 1: Use `descobrir_numero_apolice`.
-                - Passo 2: Verifique a data de vencimento.
-                - Passo 3: Se estiver no prazo (Dia ou Tolerância), use `obter_codigo_de_barras_boleto`.
+                - Passo 2: Se houver duplicidade, aplique o CRITÉRIO DE DESEMPATE (pegue a mais nova).
+                - Passo 3: Verifique a data de vencimento da apólice escolhida.
+                - Passo 4: Se estiver no prazo (Dia ou Tolerância), use `obter_codigo_de_barras_boleto`.
                   *Se for atrasado na tolerância, avise que está SEM COBERTURA.*
 
                 **SITUAÇÃO 2: Boleto Vencido (Fora do Prazo ou > 20 dias)**
