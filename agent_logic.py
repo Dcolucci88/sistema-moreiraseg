@@ -178,11 +178,11 @@ def obter_contato_especialista(intencao_usuario: str) -> str:
     """Retorna o contato do especialista baseado no assunto (RCO, Sinistro, Auto)."""
     intencao = intencao_usuario.lower()
     if "rco" in intencao or "prorroga" in intencao or "ônibus" in intencao:
-        return "Para RCO e Prorrogações, fale com a **Leidiane**: (62) 99999-9999."
+        return "Para RCO e Prorrogações, fale com a **Leidiane**: (62) 9300-6461."
     elif "sinistro" in intencao or "bati" in intencao or "roubo" in intencao:
-        return "Para Sinistros, fale urgente com a **Thuanny**: (62) 98888-8888."
+        return "Para Sinistros, fale urgente com a **Thuanny**: (62) 9417-6837."
     else:
-        return "Para Auto, Vida e outros, fale com a **Mara**: (62) 97777-7777."
+        return "Para Auto, Vida e outros, fale com a **Mara**: (11) 94516-2002."
 
 
 # --- FERRAMENTA 2: BOLETO COM REGRAS DE NEGÓCIO ---
