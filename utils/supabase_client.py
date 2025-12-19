@@ -195,6 +195,9 @@ def buscar_apolice_inteligente(termo: str) -> List[Dict[str, Any]]:
     """
     Busca apólices pesquisando por PLACA ou NOME do cliente.
     Usada pelo Agente de IA para descobrir o número da apólice.
+
+    ATUALIZAÇÃO: Ordena por 'fim_vigencia' decrescente (mais recente primeiro)
+    para evitar pegar renovações antigas.
     """
     if not supabase: return []
     print(f"🔍 IA Buscando apólice por: {termo}")
@@ -204,9 +207,12 @@ def buscar_apolice_inteligente(termo: str) -> List[Dict[str, Any]]:
         termo_limpo = termo.strip()
 
         # Busca por PLACA ou CLIENTE (case insensitive)
+        # Adicionei 'fim_vigencia' e 'status' no select para ajudar na decisão
         response = supabase.table('apolices').select(
-            "cliente, numero_apolice, placa, seguradora"
-        ).or_(f"placa.ilike.%{termo_limpo}%,cliente.ilike.%{termo_limpo}%").limit(5).execute()
+            "cliente, numero_apolice, placa, seguradora, fim_vigencia, status"
+        ).or_(f"placa.ilike.%{termo_limpo}%,cliente.ilike.%{termo_limpo}%") \
+            .order("fim_vigencia", desc=True) \
+            .limit(5).execute()
 
         return response.data
     except Exception as e:

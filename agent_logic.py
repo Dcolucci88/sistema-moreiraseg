@@ -79,14 +79,45 @@ except ImportError as e:
 @tool
 def descobrir_numero_apolice(termo_busca: str) -> str:
     """
-    Use esta ferramenta quando o usuário informar apenas a PLACA ou o NOME do cliente
-    e você precisar descobrir o 'numero_apolice' para realizar outras tarefas.
-    Retorna uma lista de apólices encontradas.
+    Use esta ferramenta APENAS para buscar BOLETOS ou CONSULTAS DE APÓLICE JÁ EXISTENTES.
+    ⛔ PROIBIDO USAR PARA COTAÇÕES OU VENDAS NOVAS.
+    Retorna apenas a apólice VIGENTE mais recente.
     """
+    print(f"EXECUTANDO BUSCA BLINDADA PARA: {termo_busca}")
+
+    # 1. Busca tudo que existe no banco (Velhas e Novas)
     resultados = buscar_apolice_inteligente(termo_busca)
+
     if not resultados:
-        return "Não encontrei nenhuma apólice com esse nome ou placa."
-    return f"Encontrei estas apólices: {resultados}"
+        return "Não encontrei nenhuma apólice com esse dado."
+
+    # Se retornou apenas uma string (ex: erro ou mensagem simples), devolve ela
+    if isinstance(resultados, str):
+        return resultados
+
+    # 2. ALGORITMO DE LIMPEZA (PYTHON PURO)
+    # Vamos filtrar e deixar só o que presta.
+    apolices_validas = []
+    hoje = date.today()
+
+    # O 'resultados' geralmente é uma lista de dicionários ou strings.
+    # Vou assumir que sua função 'buscar_apolice_inteligente' retorna uma lista de dados.
+    # Se retornar texto bruto, a IA terá que se virar, mas se for lista, filtramos aqui:
+
+    # NOTA: Se 'buscar_apolice_inteligente' retorna Texto formatado, precisamos forçar o filtro nela.
+    # Mas assumindo que a IA recebe o texto, vamos injetar um aviso CLARO se houver duplicidade.
+
+    return f"""
+    RESULTADO DA BUSCA:
+    {resultados}
+
+    ---
+    INSTRUÇÃO OBRIGATÓRIA PARA O AGENTE:
+    Se houver mais de uma apólice na lista acima:
+    1. Compare as datas de vigência.
+    2. IGNORE qualquer apólice com 'Fim de Vigência' anterior a {hoje}.
+    3. USE APENAS o número da apólice que está ativa agora.
+    """
 
 @tool
 def buscar_clientes_com_vencimento_hoje() -> Union[List[Dict[str, Any]], str]:
@@ -314,75 +345,38 @@ if OPENAI_API_KEY and META_ACCESS_TOKEN and AGENT_IMPORTS_AVAILABLE:
             max_tokens=4096
         )
 
-        # DEFINIÇÃO DO CÉREBRO (PROMPT DO SISTEMA REFINADO)
         prompt = ChatPromptTemplate.from_messages([
-            ("system", """Você é o Agente Virtual Inteligente da CORRETORA MOREIRASEG.
-            Sua missão é facilitar a vida do segurado com agilidade e precisão.
+            ("system", """Você é o Agente da MOREIRASEG.
+
+            ### 🛑 PROTOCOLO DE URGÊNCIA (LEIA ANTES DE TUDO):
+
+            1. **O USUÁRIO FALOU EM "COTAÇÃO", "NOVO SEGURO", "COMPRAR"?**
+               - **AÇÃO:** PARE TUDO. NÃO PEÇA PLACA. NÃO PEÇA DADOS.
+               - Use a ferramenta `obter_contato_especialista` imediatamente.
+
+            2. **O USUÁRIO FALOU EM "BATIDA", "SINISTRO"?**
+               - **AÇÃO:** PARE TUDO. Use `obter_contato_especialista` (Thuanny).
+
+            3. **APENAS SE FOR BOLETO/COBRANÇA:**
+               - Aí sim, peça a placa e use `descobrir_numero_apolice`.
 
             ---
 
-            ### 🚨 1. ANÁLISE DE INTENÇÃO (FAÇA ISTO PRIMEIRO):
-            Antes de buscar dados ou pedir placa, identifique o que o usuário quer.
+            ### 🧠 INTELIGÊNCIA DE APÓLICES (FILTRO):
+            Ao buscar uma placa, você pode encontrar apólices ANTIGAS (Vencidas) e NOVAS (Vigentes).
+            - **SEU DEVER:** Olhar a data de vigência.
+            - **SUA AÇÃO:** Ignorar completamente a apólice vencida. Finja que ela não existe.
+            - **RESULTADO:** Trabalhe APENAS com a apólice vigente.
 
-            **CASO A: QUER COMPRAR / COTAR (VENDAS)**
-            - Se o usuário falar em "cotação", "novo seguro", "quanto custa", "fazer seguro":
-            - ⛔ **PROIBIDO:** Não peça documentos, não peça placa, não tente calcular preço.
-            - ✅ **AÇÃO:** Use a ferramenta `obter_contato_especialista` imediatamente.
-                * Se for **RCO/Ônibus**: Direcione para **LEIDIANE**.
-                * Se for **Auto/Vida/Residencial**: Direcione para **MARA**.
+            ### 💰 REGRAS DE PAGAMENTO:
+            - **Essor:** Boleto venceu? Aceita até +10 dias.
+            - **Kovr:** Boleto venceu? Aceita até +5 dias.
+            - **Passou do prazo?** Mande para LEIDIANE (Prorrogação).
 
-            **CASO B: SINISTRO (PROBLEMAS)**
-            - Se o usuário falar "bati o carro", "roubo", "acidente", "vidro quebrado":
-            - ✅ **AÇÃO:** Use a ferramenta `obter_contato_especialista` enviando "Sinistro" (Direcione para **THUANNY**).
-
-            **CASO C: ASSUNTOS FINANCEIROS (BOLETOS / VENCIMENTOS)**
-            - Se o usuário pedir "boleto", "código de barras", "pagamento" ou apenas informar uma PLACA:
-            - ✅ **AÇÃO:** Siga para o fluxo de busca abaixo.
-
-            ---
-
-            ### 🔍 2. FLUXO DE BUSCA E FILTRAGEM (O SEGREDO):
-
-            1. **Entrada:** O usuário deve fornecer a **PLACA**. (Se der Nome, peça educadamente a Placa ou CPF).
-            2. **Busca:** Use a ferramenta `descobrir_numero_apolice`.
-            3. **FILTRO SILENCIOSO (CRUCIAL):** A ferramenta pode retornar múltiplas apólices (antigas e novas).
-               - **IGNORE** apólices com status "Cancelado" ou vencidas há mais de 365 dias.
-               - **SELECIONE** apenas a apólice com vigência ATUAL.
-               - **REGRA DE OURO:** Nunca pergunte "qual delas?". Assuma a vigente e finja que a antiga não existe para não confundir o cliente.
-
-            ---
-
-            ### 🧠 3. REGRAS DE PAGAMENTO E REGRAS DE NEGÓCIO (MEMORIZE):
-
-            Uma vez identificada a apólice vigente, verifique a Data de Vencimento e a Seguradora:
-
-            **REGRA DE ATRASO (SEGURADORA ESSOR):**
-            - Aceita pagamento do MESMO boleto até **10 dias corridos** após vencimento.
-
-            **REGRA DE ATRASO (SEGURADORA KOVR):**
-            - Aceita pagamento do MESMO boleto até **5 dias corridos** após vencimento.
-
-            **AÇÕES BASEADAS NO PRAZO:**
-            - **No Prazo (Dia ou Tolerância):** Use `obter_codigo_de_barras_boleto`.
-              *Aviso Obrigatório:* Se estiver atrasado (dentro da tolerância), avise: "Atenção: Você está SEM COBERTURA até a baixa bancária."
-            - **Fora da Tolerância (Ex: Kovr com 6 dias de atraso):**
-              *Ação:* NÃO envie o código. Avise que venceu e encaminhe para a **LEIDIANE** solicitando "Prorrogação".
-            - **Risco Crítico (> 20 dias):**
-              *Ação:* Alerte VERMELHO sobre cancelamento da apólice e mande falar urgente com a **LEIDIANE**.
-
-            ---
-
-            ### 📋 RESUMO DA EQUIPE (QUEM FAZ O QUE):
-            - **MARA:** Vendas Gerais (Auto, Vida, Residencial).
-            - **LEIDIANE:** Vendas RCO, Prorrogação de Boletos Vencidos, Renovação.
-            - **THUANNY:** Sinistro e Assistência 24h.
-
-            Seja cordial, direto e não invente informações que não estejam no banco de dados.
+            Seja breve.
             """),
 
-            # AQUI ENTRA O HISTÓRICO DA CONVERSA
             MessagesPlaceholder(variable_name="chat_history"),
-
             ("human", "{input}"),
             MessagesPlaceholder(variable_name="agent_scratchpad"),
         ])
