@@ -65,7 +65,6 @@ def descobrir_numero_apolice(termo_busca: str) -> str:
     if isinstance(resultados, str):
         return resultados
 
-    hoje = date.today()
     return f"""
     RESULTADO DA BUSCA:
     {resultados}
@@ -84,7 +83,6 @@ def buscar_clientes_com_vencimento_hoje() -> Union[List[Dict[str, Any]], str]:
 def enviar_lembrete_whatsapp(numero_telefone: str, nome_cliente: str, data_vencimento: str, valor_parcela: float,
                              numero_apolice: str, placa: str) -> str:
     """Envia uma mensagem de lembrete de vencimento via WhatsApp (API Oficial)."""
-    # ... (Mantendo sua lógica original de envio caso queira usar)
     return "Função de envio de WhatsApp acionada (Simulação)."
 
 
@@ -101,25 +99,48 @@ def obter_contato_especialista(intencao_usuario: str) -> str:
 
 
 @tool
+def solicitar_autorizacao_leidiane(numero_apolice: str, placa: str, cliente_diz_que_pagou: bool = True) -> str:
+    """
+    ACIONAR QUANDO: Cliente afirma que pagou uma parcela antiga (>25 dias).
+    AÇÃO: Envia mensagem para LEIDIANE pedindo validação manual na Seguradora.
+    """
+    print(f"🚨 NOTIFICAÇÃO PARA LEIDIANE: Cliente da placa {placa} afirma que pagou. Validar apólice {numero_apolice}.")
+
+    # Aqui entraria a chamada real da API do WhatsApp para a Leidiane
+    # Simulando o envio:
+
+    msg_leidiane = (
+        f"🔔 *SOLICITAÇÃO DE VALIDAÇÃO*\n"
+        f"O cliente da placa *{placa}* (Apólice {numero_apolice}) solicitou o boleto atual.\n"
+        f"Consta pendência antiga no sistema, mas ele afirmou que *JÁ PAGOU*.\n"
+        f"⚠️ Por favor, verifique na Seguradora se a apólice está ativa e confirme se posso enviar o boleto vigente."
+    )
+
+    # Retorno para o Agente saber o que dizer ao cliente
+    return (
+        "✅ Solicitação enviada para a Leidiane com sucesso.\n"
+        "INSTRUÇÃO AO AGENTE: Avise o cliente exatamente assim: 'Ok, registrei seu pagamento. "
+        "Por segurança, aguarde um instante, preciso validar sua apólice na Seguradora antes de você pagar. "
+        "Já avisei a equipe e te enviamos em instantes.'"
+    )
+
+
+@tool
 def obter_codigo_de_barras_boleto(numero_apolice: str, mes_referencia: int = 0) -> str:
     """
     Obtém código de barras do boleto.
-
-    PARÂMETROS:
-    - numero_apolice: O número da apólice encontrada.
-    - mes_referencia: (Opcional) Se o usuário pedir "boleto de dezembro", envie 12. Se for "esse mês", envie o mês atual. Se não especificar, envie 0.
     """
     print(f"🛠️ TOOL: Gerar Boleto {numero_apolice} (Mês ref: {mes_referencia})")
 
-    # Busca a parcela (A lógica no utils já sabe filtrar pelo mês se > 0)
     parcela = buscar_parcela_atual(numero_apolice, mes_referencia)
 
     if not parcela:
-        return f"Não encontrei boletos pendentes para a apólice {numero_apolice} no mês solicitado."
+        return f"Não encontrei boletos pendentes para a apólice {numero_apolice}."
 
     caminho_pdf = parcela.get('caminho_pdf_boletos')
     data_vencimento_str = parcela.get('data_vencimento_atual') or parcela.get('data_vencimento')
     nome_seguradora = str(parcela.get('seguradora', '')).lower()
+    placa = parcela.get('apolices', {}).get('placa', 'Não informada')
 
     if not caminho_pdf: return "PDF do boleto não encontrado."
 
@@ -131,7 +152,6 @@ def obter_codigo_de_barras_boleto(numero_apolice: str, mes_referencia: int = 0) 
 
     dias_atraso = (hoje - data_vencimento).days
 
-    # Regras de Tolerância
     tolerancia = 0
     if "essor" in nome_seguradora:
         tolerancia = 10
@@ -139,40 +159,39 @@ def obter_codigo_de_barras_boleto(numero_apolice: str, mes_referencia: int = 0) 
         tolerancia = 5
 
     # =========================================================================
-    # LÓGICA DE NEGOCIAÇÃO (A MUDANÇA ESTÁ AQUI)
+    # LÓGICA DE TRAVA DE SEGURANÇA E ESCALONAMENTO
     # =========================================================================
 
-    # Cenário: Dívida muito antiga (>25 dias) E o usuário NÃO pediu essa parcela específica
+    # CENÁRIO 1: Agente descobre a pendência antiga pela primeira vez
     if dias_atraso > 25 and mes_referencia == 0:
         return (
-            f"⚠️ **STATUS: PENDÊNCIA ANTIGA DETECTADA**\n"
-            f"Encontrei uma parcela vencida em **{data_vencimento.strftime('%d/%m/%Y')}** ({dias_atraso} dias atrás).\n\n"
-            f"🛑 **INSTRUÇÃO PARA O AGENTE (NÃO ENTREGUE O BOLETO AINDA):**\n"
-            f"1. Informe ao cliente que consta essa parcela de {data_vencimento.strftime('%B')} em aberto.\n"
-            f"2. Pergunte: 'Você já realizou o pagamento desta parcela anterior?'\n"
-            f"3. ALERTE que a falta de pagamento pode causar o **CANCELAMENTO** da apólice.\n\n"
-            f"--> **SE O CLIENTE DISSER QUE JÁ PAGOU:**\n"
-            f"Chame esta ferramenta novamente, mas agora especifique o parâmetro `mes_referencia={hoje.month}` (Mês Atual) para pular a dívida antiga."
+            f"⚠️ **ALERTA DE SISTEMA**\n"
+            f"Consta parcela vencida em **{data_vencimento.strftime('%d/%m/%Y')}** ({dias_atraso} dias atrás).\n\n"
+            f"🛑 **INSTRUÇÃO:** Pergunte ao cliente: 'Consta uma pendência antiga de {data_vencimento.strftime('%B')}. Ela já foi paga?'"
         )
 
-    # Se o cliente pediu especificamente a parcela velha (mes_referencia > 0) e ela está velha:
+    # CENÁRIO 2: Agente tenta pegar o mês atual (mes_referencia > 0)
+    # Isso significa que o cliente disse "SIM, JÁ PAGUEI".
+    # AQUI ESTÁ A LÓGICA QUE VOCÊ PEDIU:
     if dias_atraso > 25 and mes_referencia > 0:
         return (
-            f"🚫 **BLOQUEIO DE SEGURANÇA**\n"
-            f"Você pediu especificamente o boleto de {data_vencimento.strftime('%m/%Y')}, mas ele venceu há {dias_atraso} dias.\n"
-            f"Não posso emitir. Fale com a **LEIDIANE** para verificar reabilitação da apólice."
+            f"⛔ **BLOQUEIO DE SEGURANÇA ATIVO**\n"
+            f"O sistema detectou um atraso crítico de {dias_atraso} dias na parcela anterior.\n"
+            f"Mesmo com a afirmação do cliente, **NÃO ENTREGUE O CÓDIGO DE BARRAS.**\n"
+            f"Risco de apólice cancelada na Cia.\n\n"
+            f"👉 **AÇÃO OBRIGATÓRIA:** Chame IMEDIATAMENTE a ferramenta `solicitar_autorizacao_leidiane` para notificar a equipe."
         )
 
-    # Se passou da tolerância simples (ex: 7 dias), mas não é bloqueio total
+    # Se passou da tolerância simples
     if dias_atraso > tolerancia:
         nome_exibicao = "Essor" if "essor" in nome_seguradora else "Kovr"
         return (
             f"⚠️ **Boleto Vencido há {dias_atraso} dias.**\n"
-            f"A {nome_exibicao} só aceita até {tolerancia} dias. Fale com a LEIDIANE para prorrogação."
+            f"A {nome_exibicao} só aceita até {tolerancia} dias. Fale com a LEIDIANE."
         )
 
     # =========================================================================
-    # EXTRAÇÃO DO CÓDIGO (Caso esteja tudo ok ou cliente forçou mês atual)
+    # EXTRAÇÃO (Só libera se estiver tudo 100% em dia)
     # =========================================================================
 
     aviso_cobertura = ""
@@ -191,13 +210,12 @@ def obter_codigo_de_barras_boleto(numero_apolice: str, mes_referencia: int = 0) 
                     f"📋 _(Clique para copiar)_"
                 )
 
-    return f"Boleto válido ({data_vencimento.strftime('%d/%m/%Y')}), mas não consegui ler o código de barras automaticamente. Verifique o PDF."
+    return f"Boleto válido, mas não li o código."
 
 
 @tool
 def marcar_parcela_como_paga(numero_apolice: str) -> str:
-    """Registra a baixa de pagamento de uma parcela no sistema."""
-    return "Esta função deve ser usada apenas com confirmação visual do comprovante. (Simulação)"
+    return "Esta função deve ser usada apenas com confirmação visual do comprovante."
 
 
 # --- 2. CONFIGURAÇÃO DO LANGGRAPH ---
@@ -210,7 +228,8 @@ tools = [
     obter_codigo_de_barras_boleto,
     marcar_parcela_como_paga,
     descobrir_numero_apolice,
-    obter_contato_especialista
+    obter_contato_especialista,
+    solicitar_autorizacao_leidiane  # <--- NOVA FERRAMENTA DE VALIDAÇÃO
 ]
 
 llm_with_tools = None
@@ -221,34 +240,35 @@ else:
     print("⚠️ ALERTA: OPENAI_API_KEY não encontrada.")
 
 
-# --- PROMPT DO SISTEMA (PERSONALIDADE ATUALIZADA) ---
+# --- PROMPT DO SISTEMA (PERSONALIDADE SEGURA) ---
 
 class AgentState(TypedDict):
     messages: Annotated[list, add_messages]
 
 
 hoje_str = date.today().strftime("%d/%m/%Y")
-mes_atual = date.today().month
 
-system_prompt = f"""Você é o Agente da MOREIRASEG. Hoje é {hoje_str} (Mês {mes_atual}).
+system_prompt = f"""Você é o Agente da MOREIRASEG. Hoje é {hoje_str}.
 
-### 🛑 PROTOCOLO DE BOLETOS (IMPORTANTE):
-1. Primeiro, encontre a apólice usando a placa ou nome.
-2. Ao pedir o boleto, use a ferramenta `obter_codigo_de_barras_boleto`.
-3. **SE A FERRAMENTA RETORNAR UM ALERTA DE PENDÊNCIA ANTIGA:**
-   - Não bloqueie o atendimento.
-   - Pergunte ao cliente: "Consta uma pendência de [Data Antiga]. Ela já foi paga?"
-   - **SE O CLIENTE DISSER "SIM" (JÁ PAGUEI):**
-     - Acredite no cliente.
-     - Chame a ferramenta novamente, mas desta vez **force o parâmetro `mes_referencia={mes_atual}`** para pegar o boleto de agora.
-   - **SE O CLIENTE DISSER "NÃO":**
-     - Aí sim, avise que não pode emitir o novo sem quitar o antigo e mande para a Leidiane.
+### 🛑 PROTOCOLO DE SEGURANÇA - LEIA COM ATENÇÃO:
 
-### 🛑 OUTROS ASSUNTOS:
-- "Cotação"/"Novo Seguro" -> Use `obter_contato_especialista` (Mara).
-- "Sinistro"/"Batida" -> Use `obter_contato_especialista` (Thuanny).
+1. **Ao ver pendência antiga (>25 dias):**
+   - Pergunte: "Já pagou a parcela antiga?"
 
-Seja educado, mas firme quanto aos riscos de cancelamento.
+2. **Se o cliente disser "SIM" (Já paguei):**
+   - Tente buscar o boleto do mês atual (use `obter_codigo_de_barras_boleto` com mês > 0).
+   - **SE A FERRAMENTA BLOQUEAR E PEDIR VALIDAÇÃO:**
+     - **OBEDECER IMEDIATAMENTE.**
+     - Use a ferramenta `solicitar_autorizacao_leidiane`.
+     - Não tente argumentar. O risco de cancelamento é real.
+     - Responda ao cliente com a frase exata retornada pela ferramenta: "Ok, registrei seu pagamento. Por segurança, aguarde..."
+
+3. **Se o cliente disser "NÃO" (Não paguei):**
+   - Encaminhe para a Leidiane regularizar a dívida.
+
+### 🛑 OUTROS:
+- Cotações -> Mara.
+- Sinistros -> Thuanny.
 """
 
 
@@ -279,14 +299,14 @@ workflow.add_edge("tools", "agent")
 memory = MemorySaver()
 app = workflow.compile(checkpointer=memory)
 
-print("✓ LangGraph Configurado com Lógica de Negociação de Boletos.")
+print("✓ LangGraph Configurado: Fluxo de Validação Humana (Leidiane) Ativo.")
 
 
 # --- 3. INTERFACE ---
 
 def executar_agente(comando: str) -> str:
     if not llm_with_tools: return "Erro: Agente sem API Key."
-    config = {"configurable": {"thread_id": "sessao_dinamica"}}  # Thread fixa para manter contexto da conversa
+    config = {"configurable": {"thread_id": "sessao_segura_v2"}}
 
     try:
         input_message = HumanMessage(content=comando)
