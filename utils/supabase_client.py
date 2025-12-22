@@ -40,7 +40,7 @@ else:
 
 
 # ============================================================
-# 2. FUNÇÕES DO AGENTE (COM FILTRO DE MÊS AGORA)
+# 2. FUNÇÕES DO AGENTE (INTELIGÊNCIA NOVA)
 # ============================================================
 
 def buscar_parcelas_vencendo_hoje() -> List[Dict[str, Any]]:
@@ -92,15 +92,17 @@ def buscar_parcela_atual(numero_apolice: str, mes_referencia: int = None) -> Uni
         if mes_referencia and mes_referencia > 0:
             # Tenta encontrar o mês pedido pelo usuário
             for p in lista_parcelas:
-                # Extrai o mês da data 'YYYY-MM-DD'
-                mes_vencimento = int(p['data_vencimento'].split('-')[1])
-                if mes_vencimento == mes_referencia:
-                    parcela_escolhida = p
-                    break
+                try:
+                    # Extrai o mês da data 'YYYY-MM-DD'
+                    mes_vencimento = int(p['data_vencimento'].split('-')[1])
+                    if mes_vencimento == mes_referencia:
+                        parcela_escolhida = p
+                        break
+                except:
+                    continue
 
-            # Se pediu mês 12 mas não achou, avisa (retornando None ou a mais antiga com aviso? Vamos retornar None para forçar erro claro)
+            # Se não achou o mês exato, pega a primeira (fallback)
             if not parcela_escolhida:
-                # Fallback: se não achou o mês exato, pega a primeira
                 parcela_escolhida = lista_parcelas[0]
         else:
             # Se não pediu mês, pega a mais antiga (Regra Padrão)
@@ -151,7 +153,9 @@ def atualizar_status_pagamento(numero_apolice: str, data_vencimento: date) -> bo
 
 
 def buscar_apolice_inteligente(termo: str) -> List[Dict[str, Any]]:
-    """ CORRIGIDO: Ordena por 'data_inicio_vigencia' para evitar erro de coluna inexistente """
+    """
+    CORRIGIDO: Ordena por 'data_inicio_vigencia' para evitar erro de coluna inexistente.
+    """
     if not supabase: return []
     try:
         termo_limpo = termo.strip()
@@ -162,26 +166,96 @@ def buscar_apolice_inteligente(termo: str) -> List[Dict[str, Any]]:
             .limit(5).execute()
         return response.data
     except Exception as e:
-        return f"Erro busca: {str(e)}"
+        # Retorna lista vazia em caso de erro para não quebrar o fluxo
+        print(f"Erro busca inteligente: {str(e)}")
+        return []
 
 
-# --- FUNÇÕES LEGADO (MANTIDAS) ---
-def adicionar_dias_uteis(d, n): return d  # Simplificado para economizar linhas
+# ============================================================
+# 3. FUNÇÕES LEGADO (RESTAURADAS PARA O DASHBOARD FUNCIONAR)
+# ============================================================
+
+def adicionar_dias_uteis(data_inicial: date, dias_uteis: int) -> date:
+    """Calcula data útil futura (usada no cadastro de apólices)"""
+    dias_adicionados = 0
+    data_atual = data_inicial
+    while dias_adicionados < dias_uteis:
+        data_atual += timedelta(days=1)
+        if data_atual.weekday() < 5:
+            dias_adicionados += 1
+    return data_atual
 
 
-def buscar_cobrancas_boleto_do_dia(): return buscar_parcelas_vencendo_hoje()
+def buscar_cobrancas_boleto_do_dia():
+    """Alias para manter compatibilidade com código antigo"""
+    return buscar_parcelas_vencendo_hoje()
 
 
-def buscar_todas_as_parcelas_pendentes(): return []  # Simplificado
+def buscar_todas_as_parcelas_pendentes():
+    """RESTAURADA: Popula os cards de 'Parcelas Pendentes' no Dashboard"""
+    if not supabase: return []
+    try:
+        res = supabase.table("parcelas").select("*, apolices(cliente, numero_apolice)").eq("status",
+                                                                                           "Pendente").execute()
+        lista = []
+        for p in res.data:
+            if p.get('apolices'):
+                p['cliente'] = p['apolices']['cliente']
+                p['numero_apolice'] = p['apolices']['numero_apolice']
+            lista.append(p)
+        return lista
+    except:
+        return []
 
 
-def get_apolices(t=None): return pd.DataFrame()  # Simplificado
+def get_apolices(search_term=None):
+    """RESTAURADA: Popula a tabela principal e contadores do Dashboard"""
+    if not supabase: return pd.DataFrame()
+    try:
+        query = supabase.table('apolices').select("*").order('id', desc=True)
+        if search_term:
+            term = f"%{search_term}%"
+            query = query.or_(f"numero_apolice.ilike.{term},cliente.ilike.{term},placa.ilike.{term}")
+        res = query.execute()
+        df = pd.DataFrame(res.data)
+        if not df.empty:
+            # Conversão e cálculos de datas
+            df['data_inicio_vigencia'] = pd.to_datetime(df['data_inicio_vigencia']).dt.date
+            df['data_final_de_vigencia'] = df['data_inicio_vigencia'].apply(
+                lambda x: x + relativedelta(years=1) if pd.notnull(x) else None)
+            df['dias_restantes'] = (pd.to_datetime(df['data_final_de_vigencia']).dt.date - date.today()).apply(
+                lambda x: x.days)
+            df['prioridade'] = df['dias_restantes'].apply(lambda d: '⚪ Expirada' if d < 0 else (
+                '🔥 Urgente' if d <= 15 else ('⚠️ Alta' if d <= 30 else ('⚠️ Média' if d <= 60 else '✅ Baixa'))))
+        return df
+    except:
+        return pd.DataFrame()
 
 
-def get_sinistros(): return pd.DataFrame()
+def get_sinistros():
+    """RESTAURADA: Popula a aba de Sinistros"""
+    if not supabase: return pd.DataFrame()
+    try:
+        res = supabase.table('sinistros').select("*").order('data_ultima_atualizacao', desc=True).execute()
+        return pd.DataFrame(res.data) if res.data else pd.DataFrame()
+    except:
+        return pd.DataFrame()
 
 
-def add_historico(a, b, c, d=""): pass
+def add_historico(apolice_id, usuario_email, acao, detalhes=""):
+    if not supabase: return
+    try:
+        supabase.table('historico').insert(
+            {'apolice_id': apolice_id, 'usuario': usuario_email, 'acao': acao, 'detalhes': detalhes}).execute()
+    except:
+        pass
 
 
-def add_historico_sinistro(a, b, c, d, e=""): pass
+def add_historico_sinistro(sinistro_id, usuario_email, status_anterior, status_novo, observacao=""):
+    if not supabase: return
+    try:
+        supabase.table('historico_sinistros').insert(
+            {'sinistro_id': sinistro_id, 'usuario': usuario_email, 'status_anterior': status_anterior,
+             'status_novo': status_novo, 'observacao': observacao}).execute()
+    except:
+        pass
