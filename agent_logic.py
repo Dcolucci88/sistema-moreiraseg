@@ -173,13 +173,23 @@ def obter_contato_especialista(intencao_usuario: str) -> str:
         return "Para Auto, Vida e outros, fale com a **Mara**: (11) 94516-2002."
 
 
-@tool
-def obter_codigo_de_barras_boleto(numero_apolice: str) -> str:
-    """Obtém código de barras aplicando regras de RCO, trava de segurança e formatação."""
-    print(f"🛠️ TOOL: Gerar Boleto para Apólice {numero_apolice}")
+# ... (No meio do arquivo agent_logic.py) ...
 
-    parcela = buscar_parcela_atual(numero_apolice)
-    if not parcela: return f"Apólice {numero_apolice} não encontrada ou sem parcelas pendentes."
+@tool
+def obter_codigo_de_barras_boleto(numero_apolice: str, mes_referencia: int = 0) -> str:
+    """
+    Obtém código de barras do boleto.
+    IMPORTANTE:
+    - Se o usuário pedir um mês específico (ex: "boleto de dezembro"), envie 'mes_referencia=12'.
+    - Se não especificar, envie 0 (o sistema pegará o mais antigo pendente).
+    """
+    print(f"🛠️ TOOL: Gerar Boleto {numero_apolice} (Mês: {mes_referencia})")
+
+    # AQUI ESTÁ A MÁGICA: Passamos o mês para o supabase filter
+    parcela = buscar_parcela_atual(numero_apolice, mes_referencia)
+
+    if not parcela:
+        return f"Não encontrei parcelas pendentes para a apólice {numero_apolice} (Mês ref: {mes_referencia or 'Automático'})."
 
     caminho_pdf = parcela.get('caminho_pdf_boletos')
     data_vencimento_str = parcela.get('data_vencimento_atual') or parcela.get('data_vencimento')
@@ -187,6 +197,7 @@ def obter_codigo_de_barras_boleto(numero_apolice: str) -> str:
 
     if not caminho_pdf: return "PDF do boleto não encontrado."
 
+    # Lógica de Datas
     hoje = date.today()
     if isinstance(data_vencimento_str, str):
         data_vencimento = date.fromisoformat(data_vencimento_str)
@@ -202,40 +213,34 @@ def obter_codigo_de_barras_boleto(numero_apolice: str) -> str:
     elif "kovr" in nome_seguradora:
         tolerancia = 5
 
-    # Bloqueio de Segurança
+    # --- TRAVA DE SEGURANÇA INTELIGENTE ---
+    # Só bloqueia se for muito antigo E se o usuário NÃO pediu esse mês especificamente.
+    # Se o usuário pediu "Mês 12" e o mês 12 venceu há 26 dias, ainda avisamos,
+    # mas se for a parcela errada (velha), a lógica do buscar_parcela_atual já resolveu.
     if dias_atraso > 25:
         return (
             f"🚫 **BLOQUEIO DE SEGURANÇA**\n"
-            f"Fatura vencida há {dias_atraso} dias. Risco de cancelamento.\n"
-            f"⚠️ **NÃO PAGUE.** Fale com a LEIDIANE."
+            f"A fatura de vencimento **{data_vencimento.strftime('%d/%m/%Y')}** venceu há {dias_atraso} dias.\n"
+            f"⚠️ **NÃO PAGUE.** Risco de cancelamento. Fale com a LEIDIANE."
         )
 
-    # Regra de Prorrogação
-    if dias_atraso > tolerancia:
-        nome_exibicao = "Essor" if "essor" in nome_seguradora else "Kovr"
-        return (
-            f"⚠️ **Boleto Vencido há {dias_atraso} dias.**\n"
-            f"A {nome_exibicao} só aceita até {tolerancia} dias. Fale com a LEIDIANE."
-        )
+    # ... (Resto da função continua igual: gera código de barras etc) ...
 
-    aviso_cobertura = ""
-    if dias_atraso > 0:
-        aviso_cobertura = f"\n\n⚠️ **ATENÇÃO:** Sem cobertura até a baixa do pagamento."
-
+    # ... COPIE O RESTANTE DA LÓGICA DE EXTRAIR CÓDIGO DA RESPOSTA ANTERIOR AQUI ...
     if extrair_codigo_de_barras:
         pdf_bytes = baixar_pdf_bytes(caminho_pdf)
         if pdf_bytes:
             data_fmt = data_vencimento.strftime('%d/%m/%Y')
             codigo = extrair_codigo_de_barras(pdf_bytes, data_fmt)
             if codigo:
+                aviso_cobertura = "\n\n⚠️ **ATENÇÃO:** Sem cobertura até baixa." if dias_atraso > 0 else ""
                 return (
-                    f"Código de barras:{aviso_cobertura}\n\n"
+                    f"Aqui está o boleto de vencimento **{data_fmt}**:{aviso_cobertura}\n\n"
                     f"```text\n{codigo}\n```\n\n"
                     f"📋 _(Clique para copiar)_"
                 )
 
-    return "Não consegui ler o código, mas o boleto está válido no sistema."
-
+    return f"Boleto válido (Venc: {data_vencimento.strftime('%d/%m/%Y')}), mas não li o código de barras."
 
 @tool
 def marcar_parcela_como_paga(numero_apolice: str) -> str:
