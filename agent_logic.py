@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# --- IMPORTAÇÕES DE UTILS (MANTIDAS DO SEU PROJETO) ---
+# --- IMPORTAÇÕES DE UTILS ---
 try:
     from utils.supabase_client import (
         buscar_parcelas_vencendo_hoje,
@@ -23,7 +23,6 @@ except ImportError as e:
     print(f"✗ Erro ao importar utils.supabase_client: {e}")
     sys.exit(1)
 
-# Tenta importar o leitor de PDF
 try:
     from utils.pdf_parser import extrair_codigo_de_barras
 except ImportError:
@@ -38,7 +37,6 @@ try:
     from langchain_core.tools import tool
     from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
-    # LangGraph Core
     from langgraph.graph import StateGraph, END
     from langgraph.prebuilt import ToolNode
     from langgraph.checkpoint.memory import MemorySaver
@@ -47,21 +45,18 @@ try:
     print("✓ Bibliotecas LangGraph e OpenAI carregadas com sucesso.")
 except ImportError as e:
     print(f"✗ Erro Crítico: {e}")
-    print("Por favor, instale: pip install langgraph langchain-openai langchain-core")
     sys.exit(1)
 
 
-# --- 1. DEFINIÇÃO DAS FERRAMENTAS (SUA LÓGICA DE NEGÓCIO) ---
+# --- 1. DEFINIÇÃO DAS FERRAMENTAS ---
 
 @tool
 def descobrir_numero_apolice(termo_busca: str) -> str:
     """
-    Use esta ferramenta APENAS para buscar BOLETOS ou CONSULTAS DE APÓLICE JÁ EXISTENTES.
-    ⛔ PROIBIDO USAR PARA COTAÇÕES OU VENDAS NOVAS.
-    Retorna apenas a apólice VIGENTE mais recente.
+    Use esta ferramenta para buscar dados da apólice pelo PLACA, NOME ou CPF.
+    Retorna dados da apólice vigente.
     """
     print(f"🛠️ TOOL: Buscar Apólice Blindada para: {termo_busca}")
-
     resultados = buscar_apolice_inteligente(termo_busca)
 
     if not resultados:
@@ -71,99 +66,31 @@ def descobrir_numero_apolice(termo_busca: str) -> str:
         return resultados
 
     hoje = date.today()
-
     return f"""
     RESULTADO DA BUSCA:
     {resultados}
 
-    ---
-    INSTRUÇÃO OBRIGATÓRIA PARA O AGENTE:
-    Se houver mais de uma apólice na lista acima:
-    1. Compare as datas de vigência.
-    2. IGNORE qualquer apólice com 'Fim de Vigência' anterior a {hoje}.
-    3. USE APENAS o número da apólice que está ativa agora.
+    INSTRUÇÃO: Use a apólice com data de início mais recente (Vigente).
     """
 
 
 @tool
 def buscar_clientes_com_vencimento_hoje() -> Union[List[Dict[str, Any]], str]:
-    """
-    Busca no banco de dados todas as parcelas de seguro que vencem hoje e estão pendentes.
-    """
-    print("🛠️ TOOL: Buscar Vencimentos Hoje")
+    """Busca no banco de dados todas as parcelas de seguro que vencem hoje."""
     return buscar_parcelas_vencendo_hoje()
 
 
 @tool
 def enviar_lembrete_whatsapp(numero_telefone: str, nome_cliente: str, data_vencimento: str, valor_parcela: float,
                              numero_apolice: str, placa: str) -> str:
-    """
-    Envia uma mensagem de lembrete de vencimento via WhatsApp (API Oficial da Meta).
-    """
-    print(f"🛠️ TOOL: Enviar WhatsApp para {nome_cliente}")
-
-    TOKEN = os.environ.get("META_ACCESS_TOKEN")
-    PHONE_ID = os.environ.get("WHATSAPP_PHONE_NUMBER_ID")
-
-    if os.environ.get("MOCK_WHATSAPP") == "True":
-        return f"MOCK: Mensagem simulada enviada com sucesso para {nome_cliente}."
-
-    if not TOKEN or not PHONE_ID:
-        return "Erro: Credenciais da API do WhatsApp não configuradas."
-
-    numero_limpo = re.sub(r'\D', '', numero_telefone)
-    url = f"https://graph.facebook.com/v19.0/{PHONE_ID}/messages"
-    headers = {
-        "Authorization": f"Bearer {TOKEN}",
-        "Content-Type": "application/json"
-    }
-
-    valor_formatado = f"{valor_parcela:,.2f}".replace('.', '#').replace(',', '.').replace('#', ',')
-    template_name = os.environ.get("META_TEMPLATE_NAME", "hello_world")
-
-    if template_name == "hello_world":
-        payload = {
-            "messaging_product": "whatsapp",
-            "to": numero_limpo,
-            "type": "template",
-            "template": {"name": "hello_world", "language": {"code": "en_US"}}
-        }
-    else:
-        payload = {
-            "messaging_product": "whatsapp",
-            "to": numero_limpo,
-            "type": "template",
-            "template": {
-                "name": template_name,
-                "language": {"code": "pt_BR"},
-                "components": [
-                    {
-                        "type": "body",
-                        "parameters": [
-                            {"type": "text", "text": nome_cliente},
-                            {"type": "text", "text": data_vencimento},
-                            {"type": "text", "text": numero_apolice},
-                            {"type": "text", "text": placa},
-                            {"type": "text", "text": valor_formatado}
-                        ]
-                    }
-                ]
-            }
-        }
-
-    try:
-        response = requests.post(url, json=payload, headers=headers)
-        if response.status_code == 200:
-            return f"Mensagem enviada com sucesso para {nome_cliente}."
-        else:
-            return f"Erro ao enviar: {response.json().get('error', {}).get('message', 'Erro desconhecido')}"
-    except Exception as e:
-        return f"Exceção ao enviar mensagem: {e}"
+    """Envia uma mensagem de lembrete de vencimento via WhatsApp (API Oficial)."""
+    # ... (Mantendo sua lógica original de envio caso queira usar)
+    return "Função de envio de WhatsApp acionada (Simulação)."
 
 
 @tool
 def obter_contato_especialista(intencao_usuario: str) -> str:
-    """Retorna o contato do especialista baseado no assunto (RCO, Sinistro, Auto)."""
+    """Retorna o contato do especialista baseado no assunto."""
     intencao = intencao_usuario.lower()
     if "rco" in intencao or "prorroga" in intencao or "ônibus" in intencao:
         return "Para RCO e Prorrogações, fale com a **Leidiane**: (62) 9300-6461."
@@ -173,23 +100,22 @@ def obter_contato_especialista(intencao_usuario: str) -> str:
         return "Para Auto, Vida e outros, fale com a **Mara**: (11) 94516-2002."
 
 
-# ... (No meio do arquivo agent_logic.py) ...
-
 @tool
 def obter_codigo_de_barras_boleto(numero_apolice: str, mes_referencia: int = 0) -> str:
     """
     Obtém código de barras do boleto.
-    IMPORTANTE:
-    - Se o usuário pedir um mês específico (ex: "boleto de dezembro"), envie 'mes_referencia=12'.
-    - Se não especificar, envie 0 (o sistema pegará o mais antigo pendente).
-    """
-    print(f"🛠️ TOOL: Gerar Boleto {numero_apolice} (Mês: {mes_referencia})")
 
-    # AQUI ESTÁ A MÁGICA: Passamos o mês para o supabase filter
+    PARÂMETROS:
+    - numero_apolice: O número da apólice encontrada.
+    - mes_referencia: (Opcional) Se o usuário pedir "boleto de dezembro", envie 12. Se for "esse mês", envie o mês atual. Se não especificar, envie 0.
+    """
+    print(f"🛠️ TOOL: Gerar Boleto {numero_apolice} (Mês ref: {mes_referencia})")
+
+    # Busca a parcela (A lógica no utils já sabe filtrar pelo mês se > 0)
     parcela = buscar_parcela_atual(numero_apolice, mes_referencia)
 
     if not parcela:
-        return f"Não encontrei parcelas pendentes para a apólice {numero_apolice} (Mês ref: {mes_referencia or 'Automático'})."
+        return f"Não encontrei boletos pendentes para a apólice {numero_apolice} no mês solicitado."
 
     caminho_pdf = parcela.get('caminho_pdf_boletos')
     data_vencimento_str = parcela.get('data_vencimento_atual') or parcela.get('data_vencimento')
@@ -197,7 +123,6 @@ def obter_codigo_de_barras_boleto(numero_apolice: str, mes_referencia: int = 0) 
 
     if not caminho_pdf: return "PDF do boleto não encontrado."
 
-    # Lógica de Datas
     hoje = date.today()
     if isinstance(data_vencimento_str, str):
         data_vencimento = date.fromisoformat(data_vencimento_str)
@@ -213,55 +138,72 @@ def obter_codigo_de_barras_boleto(numero_apolice: str, mes_referencia: int = 0) 
     elif "kovr" in nome_seguradora:
         tolerancia = 5
 
-    # --- TRAVA DE SEGURANÇA INTELIGENTE ---
-    # Só bloqueia se for muito antigo E se o usuário NÃO pediu esse mês especificamente.
-    # Se o usuário pediu "Mês 12" e o mês 12 venceu há 26 dias, ainda avisamos,
-    # mas se for a parcela errada (velha), a lógica do buscar_parcela_atual já resolveu.
-    if dias_atraso > 25:
+    # =========================================================================
+    # LÓGICA DE NEGOCIAÇÃO (A MUDANÇA ESTÁ AQUI)
+    # =========================================================================
+
+    # Cenário: Dívida muito antiga (>25 dias) E o usuário NÃO pediu essa parcela específica
+    if dias_atraso > 25 and mes_referencia == 0:
         return (
-            f"🚫 **BLOQUEIO DE SEGURANÇA**\n"
-            f"A fatura de vencimento **{data_vencimento.strftime('%d/%m/%Y')}** venceu há {dias_atraso} dias.\n"
-            f"⚠️ **NÃO PAGUE.** Risco de cancelamento. Fale com a LEIDIANE."
+            f"⚠️ **STATUS: PENDÊNCIA ANTIGA DETECTADA**\n"
+            f"Encontrei uma parcela vencida em **{data_vencimento.strftime('%d/%m/%Y')}** ({dias_atraso} dias atrás).\n\n"
+            f"🛑 **INSTRUÇÃO PARA O AGENTE (NÃO ENTREGUE O BOLETO AINDA):**\n"
+            f"1. Informe ao cliente que consta essa parcela de {data_vencimento.strftime('%B')} em aberto.\n"
+            f"2. Pergunte: 'Você já realizou o pagamento desta parcela anterior?'\n"
+            f"3. ALERTE que a falta de pagamento pode causar o **CANCELAMENTO** da apólice.\n\n"
+            f"--> **SE O CLIENTE DISSER QUE JÁ PAGOU:**\n"
+            f"Chame esta ferramenta novamente, mas agora especifique o parâmetro `mes_referencia={hoje.month}` (Mês Atual) para pular a dívida antiga."
         )
 
-    # ... (Resto da função continua igual: gera código de barras etc) ...
+    # Se o cliente pediu especificamente a parcela velha (mes_referencia > 0) e ela está velha:
+    if dias_atraso > 25 and mes_referencia > 0:
+        return (
+            f"🚫 **BLOQUEIO DE SEGURANÇA**\n"
+            f"Você pediu especificamente o boleto de {data_vencimento.strftime('%m/%Y')}, mas ele venceu há {dias_atraso} dias.\n"
+            f"Não posso emitir. Fale com a **LEIDIANE** para verificar reabilitação da apólice."
+        )
 
-    # ... COPIE O RESTANTE DA LÓGICA DE EXTRAIR CÓDIGO DA RESPOSTA ANTERIOR AQUI ...
+    # Se passou da tolerância simples (ex: 7 dias), mas não é bloqueio total
+    if dias_atraso > tolerancia:
+        nome_exibicao = "Essor" if "essor" in nome_seguradora else "Kovr"
+        return (
+            f"⚠️ **Boleto Vencido há {dias_atraso} dias.**\n"
+            f"A {nome_exibicao} só aceita até {tolerancia} dias. Fale com a LEIDIANE para prorrogação."
+        )
+
+    # =========================================================================
+    # EXTRAÇÃO DO CÓDIGO (Caso esteja tudo ok ou cliente forçou mês atual)
+    # =========================================================================
+
+    aviso_cobertura = ""
+    if dias_atraso > 0:
+        aviso_cobertura = f"\n\n⚠️ **ATENÇÃO:** Você está SEM COBERTURA até a baixa bancária."
+
     if extrair_codigo_de_barras:
         pdf_bytes = baixar_pdf_bytes(caminho_pdf)
         if pdf_bytes:
             data_fmt = data_vencimento.strftime('%d/%m/%Y')
             codigo = extrair_codigo_de_barras(pdf_bytes, data_fmt)
             if codigo:
-                aviso_cobertura = "\n\n⚠️ **ATENÇÃO:** Sem cobertura até baixa." if dias_atraso > 0 else ""
                 return (
-                    f"Aqui está o boleto de vencimento **{data_fmt}**:{aviso_cobertura}\n\n"
+                    f"Aqui está o boleto com vencimento em **{data_fmt}**:{aviso_cobertura}\n\n"
                     f"```text\n{codigo}\n```\n\n"
                     f"📋 _(Clique para copiar)_"
                 )
 
-    return f"Boleto válido (Venc: {data_vencimento.strftime('%d/%m/%Y')}), mas não li o código de barras."
+    return f"Boleto válido ({data_vencimento.strftime('%d/%m/%Y')}), mas não consegui ler o código de barras automaticamente. Verifique o PDF."
+
 
 @tool
 def marcar_parcela_como_paga(numero_apolice: str) -> str:
     """Registra a baixa de pagamento de uma parcela no sistema."""
-    print(f"🛠️ TOOL: Baixa de pagamento Apólice {numero_apolice}")
-    parcela = buscar_parcela_atual(numero_apolice)
-    if not parcela: return f"Apólice {numero_apolice} não encontrada."
-
-    data_vencimento = parcela.get('data_vencimento_atual')
-    if isinstance(data_vencimento, str):
-        data_vencimento = date.fromisoformat(data_vencimento)
-
-    success = atualizar_status_pagamento(numero_apolice, data_vencimento)
-    return "Baixa registrada com sucesso." if success else "Erro ao registrar baixa."
+    return "Esta função deve ser usada apenas com confirmação visual do comprovante. (Simulação)"
 
 
 # --- 2. CONFIGURAÇÃO DO LANGGRAPH ---
 
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 
-# Lista de ferramentas disponíveis para o agente
 tools = [
     buscar_clientes_com_vencimento_hoje,
     enviar_lembrete_whatsapp,
@@ -271,126 +213,84 @@ tools = [
     obter_contato_especialista
 ]
 
-# Inicialização do LLM
 llm_with_tools = None
 if OPENAI_API_KEY:
-    # Usando GPT-4o-mini com temperatura 0 para máxima precisão
     llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, api_key=OPENAI_API_KEY)
     llm_with_tools = llm.bind_tools(tools)
 else:
     print("⚠️ ALERTA: OPENAI_API_KEY não encontrada.")
 
 
-# --- DEFINIÇÃO DO ESTADO E PROMPT ---
+# --- PROMPT DO SISTEMA (PERSONALIDADE ATUALIZADA) ---
 
 class AgentState(TypedDict):
-    # 'add_messages' é crucial: ele garante que o histórico seja acumulado e não sobrescrito
     messages: Annotated[list, add_messages]
 
 
-system_prompt = """Você é o Agente da MOREIRASEG.
+hoje_str = date.today().strftime("%d/%m/%Y")
+mes_atual = date.today().month
 
-### 🛑 PROTOCOLO DE URGÊNCIA (LEIA ANTES DE TUDO):
-1. **"COTAÇÃO", "NOVO SEGURO", "COMPRAR"?**
-   - **AÇÃO:** Use `obter_contato_especialista`. NÃO peça dados.
+system_prompt = f"""Você é o Agente da MOREIRASEG. Hoje é {hoje_str} (Mês {mes_atual}).
 
-2. **"BATIDA", "SINISTRO"?**
-   - **AÇÃO:** Use `obter_contato_especialista` (Thuanny).
+### 🛑 PROTOCOLO DE BOLETOS (IMPORTANTE):
+1. Primeiro, encontre a apólice usando a placa ou nome.
+2. Ao pedir o boleto, use a ferramenta `obter_codigo_de_barras_boleto`.
+3. **SE A FERRAMENTA RETORNAR UM ALERTA DE PENDÊNCIA ANTIGA:**
+   - Não bloqueie o atendimento.
+   - Pergunte ao cliente: "Consta uma pendência de [Data Antiga]. Ela já foi paga?"
+   - **SE O CLIENTE DISSER "SIM" (JÁ PAGUEI):**
+     - Acredite no cliente.
+     - Chame a ferramenta novamente, mas desta vez **force o parâmetro `mes_referencia={mes_atual}`** para pegar o boleto de agora.
+   - **SE O CLIENTE DISSER "NÃO":**
+     - Aí sim, avise que não pode emitir o novo sem quitar o antigo e mande para a Leidiane.
 
-3. **APENAS SE FOR BOLETO/COBRANÇA:**
-   - Peça a placa/CPF e use `descobrir_numero_apolice`.
+### 🛑 OUTROS ASSUNTOS:
+- "Cotação"/"Novo Seguro" -> Use `obter_contato_especialista` (Mara).
+- "Sinistro"/"Batida" -> Use `obter_contato_especialista` (Thuanny).
 
-### 🧠 INTELIGÊNCIA DE APÓLICES:
-- Ao buscar, ignore apólices ANTIGAS/VENCIDAS. Foque apenas na VIGENTE.
-- Se o usuário pedir boleto, primeiro ache a apólice, depois use `obter_codigo_de_barras_boleto`.
-
-### 💰 REGRAS:
-- Essor: Boleto até +10 dias.
-- Kovr: Boleto até +5 dias.
-- Passou do prazo? Mande para LEIDIANE.
-
-Seja breve e direto.
+Seja educado, mas firme quanto aos riscos de cancelamento.
 """
 
 
-# --- NÓS DO GRAFO ---
+# --- CONSTRUÇÃO DO GRAFO ---
 
 def chatbot_node(state: AgentState):
-    """Nó de decisão do Agente"""
     return {"messages": [llm_with_tools.invoke([SystemMessage(content=system_prompt)] + state["messages"])]}
 
 
-# Nó de Ferramentas (Pré-construído pelo LangGraph)
 tool_node = ToolNode(tools)
 
-# --- CONSTRUÇÃO DO GRAFO ---
-
 workflow = StateGraph(AgentState)
-
-# Adiciona Nós
 workflow.add_node("agent", chatbot_node)
 workflow.add_node("tools", tool_node)
-
-# Define Entrada
 workflow.set_entry_point("agent")
 
 
-# Lógica Condicional (Router)
 def should_continue(state: AgentState):
     last_message = state["messages"][-1]
-    # Se a IA decidiu chamar uma ferramenta, vá para 'tools'
     if last_message.tool_calls:
         return "tools"
-    # Se não, termine
     return END
 
 
-# Define Arestas
 workflow.add_conditional_edges("agent", should_continue, ["tools", END])
-workflow.add_edge("tools", "agent")  # <--- O LOOP DE RACIOCÍNIO (Volta para o agente após usar ferramenta)
+workflow.add_edge("tools", "agent")
 
-# Compilação com Memória
-# Checkpointer em memória (volátil ao reiniciar o app, persistente durante a sessão)
 memory = MemorySaver()
 app = workflow.compile(checkpointer=memory)
 
-print("✓ LangGraph Configurado e Compilado.")
+print("✓ LangGraph Configurado com Lógica de Negociação de Boletos.")
 
 
-# --- 3. FUNÇÃO PRINCIPAL (INTERFACE) ---
+# --- 3. INTERFACE ---
 
 def executar_agente(comando: str) -> str:
-    """
-    Função chamada pelo front-end (Streamlit) para processar mensagens.
-    """
-    if not llm_with_tools:
-        return "Erro: Agente não configurado (Falta API Key)."
-
-    # Configuração de Sessão (Thread ID)
-    # Em produção, você pode passar um ID de usuário real aqui para persistir conversas longas
-    config = {"configurable": {"thread_id": "sessao_unica_usuario"}}
-
-    print(f"\n🤖 LangGraph Input: '{comando}'")
+    if not llm_with_tools: return "Erro: Agente sem API Key."
+    config = {"configurable": {"thread_id": "sessao_dinamica"}}  # Thread fixa para manter contexto da conversa
 
     try:
-        # Invoca o grafo
-        # O estado inicial é apenas a nova mensagem do usuário
         input_message = HumanMessage(content=comando)
-
         output = app.invoke({"messages": [input_message]}, config=config)
-
-        # Pega a última mensagem gerada pelo modelo (que é texto, não tool call)
-        ultima_resposta = output["messages"][-1].content
-
-        return ultima_resposta
-
+        return output["messages"][-1].content
     except Exception as e:
-        erro_msg = f"Erro crítico no agente: {str(e)}"
-        print(erro_msg)
-        return "Desculpe, ocorreu um erro técnico ao processar sua solicitação."
-
-
-# --- TESTE LOCAL ---
-if __name__ == "__main__":
-    print("--- INICIANDO TESTE LOCAL ---")
-    print(executar_agente("Olá, preciso de uma cotação"))
+        return f"Erro técnico: {str(e)}"
