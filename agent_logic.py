@@ -1,80 +1,57 @@
 import os
-import streamlit as st
+import sys
+import re
 from datetime import date
-from dotenv import load_dotenv
-from utils.supabase_client import (
-    buscar_parcelas_vencendo_hoje,
-    atualizar_status_pagamento,
-    buscar_parcela_atual,
-    baixar_pdf_bytes,
-    buscar_apolice_inteligente
-)
+from typing import List, Dict, Any, Union, TypedDict, Annotated
+import operator
 
-# Tenta importar o leitor de PDF, se falhar, o código trata depois
+# Carrega variáveis de ambiente
+from dotenv import load_dotenv
+
+load_dotenv()
+
+# --- IMPORTAÇÕES DE UTILS (MANTIDAS DO SEU PROJETO) ---
+try:
+    from utils.supabase_client import (
+        buscar_parcelas_vencendo_hoje,
+        atualizar_status_pagamento,
+        buscar_parcela_atual,
+        baixar_pdf_bytes,
+        buscar_apolice_inteligente
+    )
+except ImportError as e:
+    print(f"✗ Erro ao importar utils.supabase_client: {e}")
+    sys.exit(1)
+
+# Tenta importar o leitor de PDF
 try:
     from utils.pdf_parser import extrair_codigo_de_barras
 except ImportError:
     extrair_codigo_de_barras = None
 
-from langchain.memory import ConversationBufferWindowMemory
-from langchain_core.prompts import MessagesPlaceholder  # Para dizer ao Prompt onde a memória deve ir
 import requests
-import re
-from typing import List, Dict, Any, Union
-import sys  # Importado para o sys.exit()
 
-# Carrega variáveis de ambiente do .env, caso existam
-load_dotenv()
-
-# --- VERIFICAÇÃO DAS VARIÁVEIS DE AMBIENTE (ALTERADO PARA OPENAI) ---
-print("Variáveis carregadas:")
-print(f"OPENAI_API_KEY: {'***' if os.environ.get('OPENAI_API_KEY') else 'NÃO ENCONTRADA'}")
-print(f"META_ACCESS_TOKEN: {'***' if os.environ.get('META_ACCESS_TOKEN') else 'NÃO ENCONTRADA'}")
-
-# --- 3. Memória (CONFIGURAÇÃO GLOBAL) ---
-# Criamos o objeto de memória que vai guardar as últimas 5 mensagens
-memory = ConversationBufferWindowMemory(
-    memory_key="chat_history",
-    return_messages=True,
-    k=5
-)
-
-# --- IMPORTAÇÕES DO MOTOR DE IA (ALTERADO PARA OPENAI) ---
+# --- IMPORTAÇÕES LANGCHAIN E LANGGRAPH ---
 try:
     from langchain_openai import ChatOpenAI
-    print("✓ ChatOpenAI importado")
-except ImportError as e:
-    print(f"✗ ChatOpenAI: {e}")
-    print("Instale a biblioteca: pip install langchain-openai")
-    sys.exit(1)
+    from langchain_core.messages import SystemMessage, HumanMessage, BaseMessage
+    from langchain_core.tools import tool
+    from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
-# --- CORREÇÃO DE IMPORTAÇÃO (LangChain v0.2+) ---
-try:
-    from langchain.agents import AgentExecutor
-    from langchain.agents import create_tool_calling_agent
+    # LangGraph Core
+    from langgraph.graph import StateGraph, END
+    from langgraph.prebuilt import ToolNode
+    from langgraph.checkpoint.memory import MemorySaver
+    from langgraph.graph.message import add_messages
 
-    print("✓ Agentes LangChain importados (Executor/ToolCalling)")
-    AGENT_IMPORTS_AVAILABLE = True
+    print("✓ Bibliotecas LangGraph e OpenAI carregadas com sucesso.")
 except ImportError as e:
-    print(f"✗ Erro ao importar agentes LangChain: {e}")
-    AGENT_IMPORTS_AVAILABLE = False
-
-try:
-    from langchain_core.prompts import ChatPromptTemplate
-    print("✓ ChatPromptTemplate importado")
-except ImportError as e:
-    print(f"✗ ChatPromptTemplate: {e}")
-    sys.exit(1)
-
-try:
-    from langchain.tools import tool
-    print("✓ tool importado")
-except ImportError as e:
-    print(f"✗ tool: {e}")
+    print(f"✗ Erro Crítico: {e}")
+    print("Por favor, instale: pip install langgraph langchain-openai langchain-core")
     sys.exit(1)
 
 
-# --- 1. Definição das Ferramentas (MANTIDAS INTACTAS) ---
+# --- 1. DEFINIÇÃO DAS FERRAMENTAS (SUA LÓGICA DE NEGÓCIO) ---
 
 @tool
 def descobrir_numero_apolice(termo_busca: str) -> str:
@@ -83,29 +60,17 @@ def descobrir_numero_apolice(termo_busca: str) -> str:
     ⛔ PROIBIDO USAR PARA COTAÇÕES OU VENDAS NOVAS.
     Retorna apenas a apólice VIGENTE mais recente.
     """
-    print(f"EXECUTANDO BUSCA BLINDADA PARA: {termo_busca}")
+    print(f"🛠️ TOOL: Buscar Apólice Blindada para: {termo_busca}")
 
-    # 1. Busca tudo que existe no banco (Velhas e Novas)
     resultados = buscar_apolice_inteligente(termo_busca)
 
     if not resultados:
         return "Não encontrei nenhuma apólice com esse dado."
 
-    # Se retornou apenas uma string (ex: erro ou mensagem simples), devolve ela
     if isinstance(resultados, str):
         return resultados
 
-    # 2. ALGORITMO DE LIMPEZA (PYTHON PURO)
-    # Vamos filtrar e deixar só o que presta.
-    apolices_validas = []
     hoje = date.today()
-
-    # O 'resultados' geralmente é uma lista de dicionários ou strings.
-    # Vou assumir que sua função 'buscar_apolice_inteligente' retorna uma lista de dados.
-    # Se retornar texto bruto, a IA terá que se virar, mas se for lista, filtramos aqui:
-
-    # NOTA: Se 'buscar_apolice_inteligente' retorna Texto formatado, precisamos forçar o filtro nela.
-    # Mas assumindo que a IA recebe o texto, vamos injetar um aviso CLARO se houver duplicidade.
 
     return f"""
     RESULTADO DA BUSCA:
@@ -119,12 +84,13 @@ def descobrir_numero_apolice(termo_busca: str) -> str:
     3. USE APENAS o número da apólice que está ativa agora.
     """
 
+
 @tool
 def buscar_clientes_com_vencimento_hoje() -> Union[List[Dict[str, Any]], str]:
     """
     Busca no banco de dados todas as parcelas de seguro que vencem hoje e estão pendentes.
     """
-    print("EXECUTANDO FERRAMENTA: buscar_clientes_com_vencimento_hoje")
+    print("🛠️ TOOL: Buscar Vencimentos Hoje")
     return buscar_parcelas_vencendo_hoje()
 
 
@@ -134,12 +100,11 @@ def enviar_lembrete_whatsapp(numero_telefone: str, nome_cliente: str, data_venci
     """
     Envia uma mensagem de lembrete de vencimento via WhatsApp (API Oficial da Meta).
     """
-    print(f"EXECUTANDO FERRAMENTA: enviar_lembrete_whatsapp para {nome_cliente} ({numero_telefone})")
+    print(f"🛠️ TOOL: Enviar WhatsApp para {nome_cliente}")
 
     TOKEN = os.environ.get("META_ACCESS_TOKEN")
     PHONE_ID = os.environ.get("WHATSAPP_PHONE_NUMBER_ID")
 
-    # Verifica se estamos em modo de teste ou produção
     if os.environ.get("MOCK_WHATSAPP") == "True":
         return f"MOCK: Mensagem simulada enviada com sucesso para {nome_cliente}."
 
@@ -154,11 +119,8 @@ def enviar_lembrete_whatsapp(numero_telefone: str, nome_cliente: str, data_venci
     }
 
     valor_formatado = f"{valor_parcela:,.2f}".replace('.', '#').replace(',', '.').replace('#', ',')
-
-    # Usa o nome do template definido nas variáveis ou um padrão
     template_name = os.environ.get("META_TEMPLATE_NAME", "hello_world")
 
-    # Se for hello_world, não mandamos parâmetros (regra do WhatsApp para teste)
     if template_name == "hello_world":
         payload = {
             "messaging_product": "whatsapp",
@@ -167,7 +129,6 @@ def enviar_lembrete_whatsapp(numero_telefone: str, nome_cliente: str, data_venci
             "template": {"name": "hello_world", "language": {"code": "en_US"}}
         }
     else:
-        # Payload completo para template de produção
         payload = {
             "messaging_product": "whatsapp",
             "to": numero_limpo,
@@ -192,18 +153,14 @@ def enviar_lembrete_whatsapp(numero_telefone: str, nome_cliente: str, data_venci
 
     try:
         response = requests.post(url, json=payload, headers=headers)
-        response_data = response.json()
-
         if response.status_code == 200:
             return f"Mensagem enviada com sucesso para {nome_cliente}."
         else:
-            return f"Erro ao enviar: {response_data.get('error', {}).get('message', 'Erro desconhecido')}"
-
+            return f"Erro ao enviar: {response.json().get('error', {}).get('message', 'Erro desconhecido')}"
     except Exception as e:
         return f"Exceção ao enviar mensagem: {e}"
 
 
-# --- FERRAMENTA 1: TRIAGEM ---
 @tool
 def obter_contato_especialista(intencao_usuario: str) -> str:
     """Retorna o contato do especialista baseado no assunto (RCO, Sinistro, Auto)."""
@@ -216,23 +173,20 @@ def obter_contato_especialista(intencao_usuario: str) -> str:
         return "Para Auto, Vida e outros, fale com a **Mara**: (11) 94516-2002."
 
 
-# --- FERRAMENTA 2: BOLETO COM REGRAS DE NEGÓCIO ---
 @tool
 def obter_codigo_de_barras_boleto(numero_apolice: str) -> str:
-    """Obtém código de barras aplicando regras de RCO e formatando para cópia fácil."""
+    """Obtém código de barras aplicando regras de RCO, trava de segurança e formatação."""
+    print(f"🛠️ TOOL: Gerar Boleto para Apólice {numero_apolice}")
 
-    # 1. Busca dados
     parcela = buscar_parcela_atual(numero_apolice)
-    if not parcela: return f"Apólice {numero_apolice} não encontrada."
+    if not parcela: return f"Apólice {numero_apolice} não encontrada ou sem parcelas pendentes."
 
     caminho_pdf = parcela.get('caminho_pdf_boletos')
-    data_vencimento_str = parcela.get('data_vencimento_atual')
-    # Tenta pegar seguradora (se não tiver, assume genérico)
+    data_vencimento_str = parcela.get('data_vencimento_atual') or parcela.get('data_vencimento')
     nome_seguradora = str(parcela.get('seguradora', '')).lower()
 
     if not caminho_pdf: return "PDF do boleto não encontrado."
 
-    # 2. Cálculos de Data
     hoje = date.today()
     if isinstance(data_vencimento_str, str):
         data_vencimento = date.fromisoformat(data_vencimento_str)
@@ -241,188 +195,197 @@ def obter_codigo_de_barras_boleto(numero_apolice: str) -> str:
 
     dias_atraso = (hoje - data_vencimento).days
 
-    # 3. Definição de Tolerância
+    # Regras de Tolerância
     tolerancia = 0
     if "essor" in nome_seguradora:
         tolerancia = 10
     elif "kovr" in nome_seguradora:
         tolerancia = 5
 
-    # 4. Regras de Negócio
-
-    # --- Regra Crítica (> 20 dias) ---
-    if dias_atraso > 20:
+    # Bloqueio de Segurança
+    if dias_atraso > 25:
         return (
-            f"🚨 **URGENTE: RISCO DE CANCELAMENTO**\n"
-            f"O boleto venceu há {dias_atraso} dias. Fale com a LEIDIANE imediatamente para tentar salvar a apólice."
+            f"🚫 **BLOQUEIO DE SEGURANÇA**\n"
+            f"Fatura vencida há {dias_atraso} dias. Risco de cancelamento.\n"
+            f"⚠️ **NÃO PAGUE.** Fale com a LEIDIANE."
         )
 
-    # --- Regra de Prorrogação (Passou da tolerância) ---
+    # Regra de Prorrogação
     if dias_atraso > tolerancia:
         nome_exibicao = "Essor" if "essor" in nome_seguradora else "Kovr"
         return (
             f"⚠️ **Boleto Vencido há {dias_atraso} dias.**\n"
-            f"A {nome_exibicao} só aceita até {tolerancia} dias. O código antigo não funciona mais.\n"
-            f"Solicite a **Prorrogação** (novo boleto) com a LEIDIANE."
+            f"A {nome_exibicao} só aceita até {tolerancia} dias. Fale com a LEIDIANE."
         )
 
-    # --- Regra de Cobertura (Atrasado mas aceitável) ---
     aviso_cobertura = ""
     if dias_atraso > 0:
-        aviso_cobertura = f"\n\n⚠️ **ATENÇÃO:** Você está SEM COBERTURA até a baixa bancária do pagamento."
+        aviso_cobertura = f"\n\n⚠️ **ATENÇÃO:** Sem cobertura até a baixa do pagamento."
 
-    # 5. Extração e Formatação (O Pulo do Gato para o Copiar/Colar)
     if extrair_codigo_de_barras:
         pdf_bytes = baixar_pdf_bytes(caminho_pdf)
         if pdf_bytes:
-            # Formata data para dd/mm/aaaa
             data_fmt = data_vencimento.strftime('%d/%m/%Y')
             codigo = extrair_codigo_de_barras(pdf_bytes, data_fmt)
-
             if codigo:
-                # As crases triplas ```text criam a caixa com botão de cópia
                 return (
-                    f"Aqui está o código de barras para o pagamento:{aviso_cobertura}\n\n"
+                    f"Código de barras:{aviso_cobertura}\n\n"
                     f"```text\n{codigo}\n```\n\n"
-                    f"📋 _(Clique no ícone acima para copiar)_"
+                    f"📋 _(Clique para copiar)_"
                 )
 
-    return "Não consegui ler o código, mas o boleto está válido (verifique o PDF)."
+    return "Não consegui ler o código, mas o boleto está válido no sistema."
 
-
-# --- ATENÇÃO: AQUI EU REMOVI A SEGUNDA VERSÃO REPETIDA DA FUNÇÃO ACIMA ---
 
 @tool
 def marcar_parcela_como_paga(numero_apolice: str) -> str:
-    """
-    Registra a baixa de pagamento de uma parcela no sistema.
-    """
-    print(f"EXECUTANDO FERRAMENTA: marcar_parcela_como_paga para a apólice {numero_apolice}")
-
+    """Registra a baixa de pagamento de uma parcela no sistema."""
+    print(f"🛠️ TOOL: Baixa de pagamento Apólice {numero_apolice}")
     parcela = buscar_parcela_atual(numero_apolice)
-    if not parcela:
-        return f"Não foi possível encontrar os dados da apólice {numero_apolice} para dar baixa."
+    if not parcela: return f"Apólice {numero_apolice} não encontrada."
 
     data_vencimento = parcela.get('data_vencimento_atual')
-    if not data_vencimento:
-        return f"Não foi possível determinar a data de vencimento."
-
     if isinstance(data_vencimento, str):
         data_vencimento = date.fromisoformat(data_vencimento)
 
     success = atualizar_status_pagamento(numero_apolice, data_vencimento)
-    if success:
-        return f"A baixa de pagamento para a apólice {numero_apolice} foi registrada com sucesso."
-    else:
-        return f"Ocorreu um erro ao tentar registrar a baixa."
+    return "Baixa registrada com sucesso." if success else "Erro ao registrar baixa."
 
 
-# --- 2. Inicialização do Agente e LLM (AGORA COM OPENAI) ---
+# --- 2. CONFIGURAÇÃO DO LANGGRAPH ---
+
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
-META_ACCESS_TOKEN = os.environ.get("META_ACCESS_TOKEN")
 
-llm = None
-agent_executor = None
-
-# LISTA DE FERRAMENTAS CORRIGIDA (Adicionei a obter_contato_especialista)
+# Lista de ferramentas disponíveis para o agente
 tools = [
     buscar_clientes_com_vencimento_hoje,
     enviar_lembrete_whatsapp,
     obter_codigo_de_barras_boleto,
     marcar_parcela_como_paga,
     descobrir_numero_apolice,
-    obter_contato_especialista  # <--- FALTAVA ISSO AQUI
+    obter_contato_especialista
 ]
 
-# Verifica a chave da OpenAI agora
-if OPENAI_API_KEY and META_ACCESS_TOKEN and AGENT_IMPORTS_AVAILABLE:
-    try:
-        # Inicializa o LLM com OpenAI (GPT-4o mini)
-        llm = ChatOpenAI(
-            model="gpt-4o-mini",
-            api_key=OPENAI_API_KEY,
-            temperature=0,
-            max_tokens=4096
-        )
-
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", """Você é o Agente da MOREIRASEG.
-
-            ### 🛑 PROTOCOLO DE URGÊNCIA (LEIA ANTES DE TUDO):
-
-            1. **O USUÁRIO FALOU EM "COTAÇÃO", "NOVO SEGURO", "COMPRAR"?**
-               - **AÇÃO:** PARE TUDO. NÃO PEÇA PLACA. NÃO PEÇA DADOS.
-               - Use a ferramenta `obter_contato_especialista` imediatamente.
-
-            2. **O USUÁRIO FALOU EM "BATIDA", "SINISTRO"?**
-               - **AÇÃO:** PARE TUDO. Use `obter_contato_especialista` (Thuanny).
-
-            3. **APENAS SE FOR BOLETO/COBRANÇA:**
-               - Aí sim, peça a placa e use `descobrir_numero_apolice`.
-
-            ---
-
-            ### 🧠 INTELIGÊNCIA DE APÓLICES (FILTRO):
-            Ao buscar uma placa, você pode encontrar apólices ANTIGAS (Vencidas) e NOVAS (Vigentes).
-            - **SEU DEVER:** Olhar a data de vigência.
-            - **SUA AÇÃO:** Ignorar completamente a apólice vencida. Finja que ela não existe.
-            - **RESULTADO:** Trabalhe APENAS com a apólice vigente.
-
-            ### 💰 REGRAS DE PAGAMENTO:
-            - **Essor:** Boleto venceu? Aceita até +10 dias.
-            - **Kovr:** Boleto venceu? Aceita até +5 dias.
-            - **Passou do prazo?** Mande para LEIDIANE (Prorrogação).
-
-            Seja breve.
-            """),
-
-            MessagesPlaceholder(variable_name="chat_history"),
-            ("human", "{input}"),
-            MessagesPlaceholder(variable_name="agent_scratchpad"),
-        ])
-
-        # Cria o Agente
-        agent = create_tool_calling_agent(llm, tools, prompt)
-
-        # Cria o Executor COM A MEMÓRIA INTEGRADA
-        agent_executor = AgentExecutor(
-            agent=agent,
-            tools=tools,
-            memory=memory,
-            verbose=True,
-            handle_parsing_errors=True,
-            max_iterations=10
-        )
-
-        print("✓ Agente inicializado com sucesso (GPT-4o mini + Memória)")
-
-    except Exception as e:
-        print(f"✗ Erro ao inicializar agente OpenAI: {e}")
-        agent_executor = None
+# Inicialização do LLM
+llm_with_tools = None
+if OPENAI_API_KEY:
+    # Usando GPT-4o-mini com temperatura 0 para máxima precisão
+    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, api_key=OPENAI_API_KEY)
+    llm_with_tools = llm.bind_tools(tools)
 else:
-    print("ALERTA: Agente desabilitado. Verifique as chaves OPENAI_API_KEY no .env ou Secrets.")
+    print("⚠️ ALERTA: OPENAI_API_KEY não encontrada.")
 
 
-# --- 5. Função Principal ---
+# --- DEFINIÇÃO DO ESTADO E PROMPT ---
+
+class AgentState(TypedDict):
+    # 'add_messages' é crucial: ele garante que o histórico seja acumulado e não sobrescrito
+    messages: Annotated[list, add_messages]
+
+
+system_prompt = """Você é o Agente da MOREIRASEG.
+
+### 🛑 PROTOCOLO DE URGÊNCIA (LEIA ANTES DE TUDO):
+1. **"COTAÇÃO", "NOVO SEGURO", "COMPRAR"?**
+   - **AÇÃO:** Use `obter_contato_especialista`. NÃO peça dados.
+
+2. **"BATIDA", "SINISTRO"?**
+   - **AÇÃO:** Use `obter_contato_especialista` (Thuanny).
+
+3. **APENAS SE FOR BOLETO/COBRANÇA:**
+   - Peça a placa/CPF e use `descobrir_numero_apolice`.
+
+### 🧠 INTELIGÊNCIA DE APÓLICES:
+- Ao buscar, ignore apólices ANTIGAS/VENCIDAS. Foque apenas na VIGENTE.
+- Se o usuário pedir boleto, primeiro ache a apólice, depois use `obter_codigo_de_barras_boleto`.
+
+### 💰 REGRAS:
+- Essor: Boleto até +10 dias.
+- Kovr: Boleto até +5 dias.
+- Passou do prazo? Mande para LEIDIANE.
+
+Seja breve e direto.
+"""
+
+
+# --- NÓS DO GRAFO ---
+
+def chatbot_node(state: AgentState):
+    """Nó de decisão do Agente"""
+    return {"messages": [llm_with_tools.invoke([SystemMessage(content=system_prompt)] + state["messages"])]}
+
+
+# Nó de Ferramentas (Pré-construído pelo LangGraph)
+tool_node = ToolNode(tools)
+
+# --- CONSTRUÇÃO DO GRAFO ---
+
+workflow = StateGraph(AgentState)
+
+# Adiciona Nós
+workflow.add_node("agent", chatbot_node)
+workflow.add_node("tools", tool_node)
+
+# Define Entrada
+workflow.set_entry_point("agent")
+
+
+# Lógica Condicional (Router)
+def should_continue(state: AgentState):
+    last_message = state["messages"][-1]
+    # Se a IA decidiu chamar uma ferramenta, vá para 'tools'
+    if last_message.tool_calls:
+        return "tools"
+    # Se não, termine
+    return END
+
+
+# Define Arestas
+workflow.add_conditional_edges("agent", should_continue, ["tools", END])
+workflow.add_edge("tools", "agent")  # <--- O LOOP DE RACIOCÍNIO (Volta para o agente após usar ferramenta)
+
+# Compilação com Memória
+# Checkpointer em memória (volátil ao reiniciar o app, persistente durante a sessão)
+memory = MemorySaver()
+app = workflow.compile(checkpointer=memory)
+
+print("✓ LangGraph Configurado e Compilado.")
+
+
+# --- 3. FUNÇÃO PRINCIPAL (INTERFACE) ---
+
 def executar_agente(comando: str) -> str:
-    """Envia um comando para o agente de IA e retorna a resposta."""
-    if agent_executor is None:
-        return "Desculpe, o Agente de IA não está configurado corretamente. Verifique as chaves de API."
+    """
+    Função chamada pelo front-end (Streamlit) para processar mensagens.
+    """
+    if not llm_with_tools:
+        return "Erro: Agente não configurado (Falta API Key)."
 
-    print(f"\n--- Executando Agente com o comando: '{comando}' ---")
+    # Configuração de Sessão (Thread ID)
+    # Em produção, você pode passar um ID de usuário real aqui para persistir conversas longas
+    config = {"configurable": {"thread_id": "sessao_unica_usuario"}}
+
+    print(f"\n🤖 LangGraph Input: '{comando}'")
+
     try:
-        # O invoke agora usa a memória automaticamente
-        response = agent_executor.invoke({"input": comando})
-        return response.get('output', 'Erro: Nenhuma saída gerada.')
+        # Invoca o grafo
+        # O estado inicial é apenas a nova mensagem do usuário
+        input_message = HumanMessage(content=comando)
+
+        output = app.invoke({"messages": [input_message]}, config=config)
+
+        # Pega a última mensagem gerada pelo modelo (que é texto, não tool call)
+        ultima_resposta = output["messages"][-1].content
+
+        return ultima_resposta
+
     except Exception as e:
-        print(f"Ocorreu um erro ao executar o agente: {e}")
-        return f"Desculpe, tive um problema técnico: {e}"
+        erro_msg = f"Erro crítico no agente: {str(e)}"
+        print(erro_msg)
+        return "Desculpe, ocorreu um erro técnico ao processar sua solicitação."
 
 
-# Bloco de teste local
-if __name__ == '__main__':
-    print("TESTE LOCAL INICIADO")
-    # Simula conversa
-    print(executar_agente("Olá, quem é você?"))
-    # Teste de triagem
-    print(executar_agente("Bati meu carro, o que faço?"))
+# --- TESTE LOCAL ---
+if __name__ == "__main__":
+    print("--- INICIANDO TESTE LOCAL ---")
+    print(executar_agente("Olá, preciso de uma cotação"))
