@@ -48,15 +48,17 @@ except ImportError as e:
     sys.exit(1)
 
 
-# --- 1. DEFINIÇÃO DAS FERRAMENTAS ---
+# --- 1. DEFINIÇÃO DAS FERRAMENTAS (COM DOCSTRINGS CORRIGIDAS) ---
 
 @tool
 def descobrir_numero_apolice(termo_busca: str) -> str:
     """
-    Use esta ferramenta para buscar dados da apólice pelo PLACA, NOME ou CPF.
-    Retorna dados da apólice vigente.
+    Busca dados da apólice vigente pelo PLACA, NOME ou CPF.
+
+    Args:
+        termo_busca: A placa (ex: ABC-1234) ou nome do cliente.
     """
-    print(f"🛠️ TOOL: Buscar Apólice Blindada para: {termo_busca}")
+    # print(f"🛠️ TOOL: Buscar Apólice Blindada para: {termo_busca}")
     resultados = buscar_apolice_inteligente(termo_busca)
 
     if not resultados:
@@ -82,13 +84,28 @@ def buscar_clientes_com_vencimento_hoje() -> Union[List[Dict[str, Any]], str]:
 @tool
 def enviar_lembrete_whatsapp(numero_telefone: str, nome_cliente: str, data_vencimento: str, valor_parcela: float,
                              numero_apolice: str, placa: str) -> str:
-    """Envia uma mensagem de lembrete de vencimento via WhatsApp (API Oficial)."""
+    """
+    Envia uma mensagem de lembrete de vencimento via WhatsApp.
+
+    Args:
+        numero_telefone: Telefone do cliente.
+        nome_cliente: Nome do cliente.
+        data_vencimento: Data de vencimento.
+        valor_parcela: Valor da parcela.
+        numero_apolice: Número da apólice.
+        placa: Placa do veículo.
+    """
     return "Função de envio de WhatsApp acionada (Simulação)."
 
 
 @tool
 def obter_contato_especialista(intencao_usuario: str) -> str:
-    """Retorna o contato do especialista baseado no assunto."""
+    """
+    Retorna o contato do especialista baseado no assunto.
+
+    Args:
+        intencao_usuario: O assunto que o usuário quer tratar (ex: Sinistro, Cotação).
+    """
     intencao = intencao_usuario.lower()
     if "rco" in intencao or "prorroga" in intencao or "ônibus" in intencao:
         return "Para RCO e Prorrogações, fale com a **Leidiane**: (62) 9300-6461."
@@ -99,22 +116,17 @@ def obter_contato_especialista(intencao_usuario: str) -> str:
 
 
 @tool
-def solicitar_autorizacao_leidiane(numero_apolice: str, placa: str, cliente_diz_que_pagou: bool = True) -> str:
+def solicitar_autorizacao_leidiane(numero_apolice: str, placa: str, cliente_afirmou_pagamento: bool) -> str:
     """
     ACIONAR QUANDO: Cliente afirma que pagou uma parcela antiga (>25 dias).
-    AÇÃO: Envia mensagem para LEIDIANE pedindo validação manual na Seguradora.
+    AÇÃO: Envia mensagem para LEIDIANE pedindo validação manual.
+
+    Args:
+        numero_apolice: O número da apólice em questão.
+        placa: A placa do veículo.
+        cliente_afirmou_pagamento: Sempre True se o cliente disse que pagou.
     """
     print(f"🚨 NOTIFICAÇÃO PARA LEIDIANE: Cliente da placa {placa} afirma que pagou. Validar apólice {numero_apolice}.")
-
-    # Aqui entraria a chamada real da API do WhatsApp para a Leidiane
-    # Simulando o envio:
-
-    msg_leidiane = (
-        f"🔔 *SOLICITAÇÃO DE VALIDAÇÃO*\n"
-        f"O cliente da placa *{placa}* (Apólice {numero_apolice}) solicitou o boleto atual.\n"
-        f"Consta pendência antiga no sistema, mas ele afirmou que *JÁ PAGOU*.\n"
-        f"⚠️ Por favor, verifique na Seguradora se a apólice está ativa e confirme se posso enviar o boleto vigente."
-    )
 
     # Retorno para o Agente saber o que dizer ao cliente
     return (
@@ -129,6 +141,10 @@ def solicitar_autorizacao_leidiane(numero_apolice: str, placa: str, cliente_diz_
 def obter_codigo_de_barras_boleto(numero_apolice: str, mes_referencia: int = 0) -> str:
     """
     Obtém código de barras do boleto.
+
+    Args:
+        numero_apolice: O número da apólice encontrada.
+        mes_referencia: (Opcional) Se o usuário pedir um mês específico (ex: 12 para Dezembro). Se não, use 0.
     """
     print(f"🛠️ TOOL: Gerar Boleto {numero_apolice} (Mês ref: {mes_referencia})")
 
@@ -172,14 +188,13 @@ def obter_codigo_de_barras_boleto(numero_apolice: str, mes_referencia: int = 0) 
 
     # CENÁRIO 2: Agente tenta pegar o mês atual (mes_referencia > 0)
     # Isso significa que o cliente disse "SIM, JÁ PAGUEI".
-    # AQUI ESTÁ A LÓGICA QUE VOCÊ PEDIU:
     if dias_atraso > 25 and mes_referencia > 0:
         return (
             f"⛔ **BLOQUEIO DE SEGURANÇA ATIVO**\n"
             f"O sistema detectou um atraso crítico de {dias_atraso} dias na parcela anterior.\n"
             f"Mesmo com a afirmação do cliente, **NÃO ENTREGUE O CÓDIGO DE BARRAS.**\n"
             f"Risco de apólice cancelada na Cia.\n\n"
-            f"👉 **AÇÃO OBRIGATÓRIA:** Chame IMEDIATAMENTE a ferramenta `solicitar_autorizacao_leidiane` para notificar a equipe."
+            f"👉 **AÇÃO OBRIGATÓRIA:** Chame IMEDIATAMENTE a ferramenta `solicitar_autorizacao_leidiane`."
         )
 
     # Se passou da tolerância simples
@@ -215,6 +230,7 @@ def obter_codigo_de_barras_boleto(numero_apolice: str, mes_referencia: int = 0) 
 
 @tool
 def marcar_parcela_como_paga(numero_apolice: str) -> str:
+    """Registra a baixa de pagamento de uma parcela (Simulação)."""
     return "Esta função deve ser usada apenas com confirmação visual do comprovante."
 
 
@@ -259,9 +275,9 @@ system_prompt = f"""Você é o Agente da MOREIRASEG. Hoje é {hoje_str}.
    - Tente buscar o boleto do mês atual (use `obter_codigo_de_barras_boleto` com mês > 0).
    - **SE A FERRAMENTA BLOQUEAR E PEDIR VALIDAÇÃO:**
      - **OBEDECER IMEDIATAMENTE.**
-     - Use a ferramenta `solicitar_autorizacao_leidiane`.
+     - Use a ferramenta `solicitar_autorizacao_leidiane` (envie True no pagamento).
      - Não tente argumentar. O risco de cancelamento é real.
-     - Responda ao cliente com a frase exata retornada pela ferramenta: "Ok, registrei seu pagamento. Por segurança, aguarde..."
+     - Responda ao cliente com a frase exata retornada pela ferramenta.
 
 3. **Se o cliente disser "NÃO" (Não paguei):**
    - Encaminhe para a Leidiane regularizar a dívida.
@@ -306,7 +322,7 @@ print("✓ LangGraph Configurado: Fluxo de Validação Humana (Leidiane) Ativo."
 
 def executar_agente(comando: str) -> str:
     if not llm_with_tools: return "Erro: Agente sem API Key."
-    config = {"configurable": {"thread_id": "sessao_segura_v2"}}
+    config = {"configurable": {"thread_id": "sessao_segura_v3"}}
 
     try:
         input_message = HumanMessage(content=comando)
