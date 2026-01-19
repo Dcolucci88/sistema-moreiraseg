@@ -8,22 +8,30 @@ requests
 schedule
 fastapi
 uvicorn
-pydantic
+# Pydantic v2 é essencial para o browser-use e langchain moderno
+pydantic>=2.9.0
 
 # --- IA & LANGCHAIN (Core + OpenAI) ---
+# O browser-use exige versões recentes, isso aqui está ótimo
 langchain>=0.3.0
 langchain-community>=0.3.0
 langchain-core>=0.3.0
 langchain-text-splitters>=0.3.0
 langchain-openai>=0.2.0
 
-# --- NOVO MOTOR DE AGENTE ---
+# --- NOVO MOTOR DE AGENTE (Automação Web) ---
 langgraph
+browser-use
+playwright
 
 # --- PROCESSAMENTO DE ARQUIVOS ---
 pypdf>=4.0.0
 
-# --- BANCO VETORIAL (Opcional) ---
-# Se você não usa busca vetorial (RAG) local, pode remover estas duas:
+# --- BANCO VETORIAL ---
+# ChromaDB >= 0.5.0 já tem suporte melhor ao Pydantic v2
 chromadb>=0.5.0
 faiss-cpu
+
+# --- INTEGRAÇÃO GOOGLE SHEETS ---
+gspread
+google-auth

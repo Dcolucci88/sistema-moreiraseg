@@ -71,5 +71,5 @@ venv.bak/
 secrets.toml
 
 # Arquivos de segredos e configuração local
-# Adicione outros arquivos sensíveis aqui se necessário
 supabase_client.env
+credentials.json

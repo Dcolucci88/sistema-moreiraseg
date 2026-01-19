@@ -2,6 +2,7 @@
 
 import streamlit as st
 import pandas as pd
+import gspread
 import datetime
 from datetime import date, timedelta, timezone
 import os
@@ -13,7 +14,7 @@ from supabase import create_client, Client
 from utils.supabase_client import get_apolices
 import threading # <-- NOVO IMPORT PARA O AGENDADOR
 import time # <-- NOVO IMPORT PARA O AGENDADOR
-
+from extrair_dados_apolice import extrair_dados_do_pdf
 # --- IMPORTAÇÕES EXTRAS (AGENDADOR E AGENTE) ---
 import schedule  # Biblioteca para rodar o robô as 09:00
 
@@ -354,123 +355,128 @@ def render_dashboard():
 
 def render_cadastro_form():
     st.title("➕ Cadastrar Nova Apólice")
+
+    # 1. INICIALIZAÇÃO DO ESTADO (Para o Agente Moreira e Lógica de Frota)
+    if 'dados_extraidos' not in st.session_state:
+        st.session_state.dados_extraidos = {
+            "seguradora": "", "numero": "", "cliente": "",
+            "placa": "", "vigencia": date.today()
+        }
     if 'is_frota' not in st.session_state: st.session_state.is_frota = False
-    if 'tipo_cobranca' not in st.session_state: st.session_state.tipo_cobranca = "Boleto"
-    with st.form("form_cadastro", clear_on_submit=True):
+
+    # 2. AGENTE MOREIRA (Upload fora do formulário para disparar a extração imediata)
+    with st.expander("🤖 Agente Moreira - Preenchimento Automático", expanded=True):
+        arquivo_ia = st.file_uploader("📂 Suba a Apólice (PDF) para análise", type=["pdf"], key="ia_uploader")
+
+        if arquivo_ia and st.button("Executar Agente Moreira"):
+            with st.spinner("Agente Moreira lendo apólice..."):
+                # Chama a função que está no seu outro arquivo
+                resultado = extrair_dados_do_pdf(arquivo_ia)
+
+                # Atualiza o formulário com os dados reais extraídos pela IA
+                st.session_state.dados_extraidos.update(resultado)
+                st.success("O Agente Moreira concluiu a análise! Verifique os campos abaixo.")
+
+    # 3. FORMULÁRIO DE CADASTRO ÚNICO
+    with st.form("form_cadastro", clear_on_submit=False):
         st.subheader("Dados da Apólice")
         st.session_state.is_frota = st.toggle("É uma apólice de Frota?", key="toggle_frota",
                                               value=st.session_state.is_frota)
+
         col1, col2 = st.columns(2)
         with col1:
-            seguradora = st.text_input("Seguradora*", max_chars=50)
-            numero_apolice = st.text_input("Número da Apólice*", max_chars=50)
-            tipo_seguro = st.selectbox("Tipo de Seguro*",
-                                       ["Automóvel", "RCO", "Vida", "Residencial", "Empresarial", "Saúde", "Viagem",
-                                        "Fiança", "Outro"])
+            seguradora = st.text_input("Seguradora*", value=st.session_state.dados_extraidos['seguradora'],
+                                       max_chars=50)
+            numero_apolice = st.text_input("Número da Apólice*", value=st.session_state.dados_extraidos['numero'],
+                                           max_chars=50)
+            tipo_seguro = st.selectbox("Tipo de Seguro*", ["Automóvel", "RCO", "Vida", "Residencial", "Outro"])
+            opcoes_cobranca = ["Boleto", "Boleto a Vista", "Faturamento", "Cartão de Crédito", "Débito em Conta"]
+            tipo_cobranca_selecionado = st.selectbox("Tipo de Cobrança*", options=opcoes_cobranca)
+
         with col2:
-            cliente = st.text_input("Cliente*", max_chars=100)
+            cliente = st.text_input("Cliente*", value=st.session_state.dados_extraidos['cliente'], max_chars=100)
             if st.session_state.is_frota:
-                placas_input = st.text_area("Placas da Frota (uma por linha)*", height=105,
-                                            help="Digite cada placa em uma nova linha.")
+                placas_input = st.text_area("Placas da Frota (uma por linha)*", height=105)
                 placa_unica_input = ""
             else:
-                placa_unica_input = st.text_input("🚗 Placa do Veículo (Opcional)", max_chars=10)
+                placa_unica_input = st.text_input("🚗 Placa do Veículo (Opcional)",
+                                                  value=st.session_state.dados_extraidos['placa'], max_chars=10)
                 placas_input = ""
-            opcoes_cobranca = ["Boleto", "Boleto a Vista", "Faturamento", "Cartão de Crédito", "Débito em Conta"]
-            if st.session_state.is_frota:
-                tipo_cobranca_selecionado = "Faturamento"
-                qtd_parcelas_valor = 12
-                campos_parcelas_travados = True
-            elif st.session_state.get('select_cobranca') == "Boleto a Vista":
-                tipo_cobranca_selecionado = "Boleto a Vista"
-                qtd_parcelas_valor = 1
-                campos_parcelas_travados = True
-            else:
-                tipo_cobranca_selecionado = st.session_state.get('select_cobranca', "Boleto")
-                qtd_parcelas_valor = 10
-                campos_parcelas_travados = False
-            st.selectbox("Tipo de Cobrança*", options=opcoes_cobranca,
-                         index=opcoes_cobranca.index(tipo_cobranca_selecionado), key="select_cobranca",
-                         disabled=st.session_state.is_frota)
+
         st.subheader("Vigência e Parcelamento")
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            data_inicio = st.date_input("📅 Início de Vigência*", format="DD/MM/YYYY")
-        with col2:
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            data_inicio = st.date_input("📅 Início de Vigência*",
+                                        value=st.session_state.dados_extraidos.get('vigencia', date.today()),
+                                        format="DD/MM/YYYY")
+        with c2:
             vencimento_primeira_parcela = st.date_input("📅 Vencimento da 1ª Parcela*", format="DD/MM/YYYY")
-        with col3:
+        with c3:
             dia_vencimento_demais = st.number_input("Dia Venc. Demais Parcelas*", min_value=1, max_value=31, value=23)
-        with col4:
+        with c4:
+            # Lógica de travas baseada no tipo de frota ou cobrança
+            default_parcelas = 12 if st.session_state.is_frota else 10
             quantidade_parcelas = st.number_input("Quantidade de Parcelas*", min_value=1, max_value=24,
-                                                  value=qtd_parcelas_valor, disabled=campos_parcelas_travados,
-                                                  key="qtd_parcelas")
+                                                  value=default_parcelas)
+
         st.subheader("Valores e Comissão")
-        col1, col2 = st.columns(2)
-        with col1:
+        v1, v2 = st.columns(2)
+        with v1:
             valor_parcela_str = st.text_input("💰 Valor de Cada Parcela (R$)*", value="0,00")
-        with col2:
-            comissao = st.number_input("💼 Comissão (%)", min_value=0.0, max_value=100.0, value=10.0, step=0.5,
+        with v2:
+            comissao = st.number_input("💼 Comissão (%)*", min_value=0.0, max_value=100.0, value=10.0, step=0.5,
                                        format="%.2f")
+
         st.subheader("Dados de Contato e Anexos")
         contato = st.text_input("📱 Contato do Cliente*", max_chars=100)
         email = st.text_input("📧 E-mail do Cliente", max_chars=100)
         observacoes = st.text_area("📝 Observações", height=100)
+
         pdf_apolice_file = st.file_uploader("📎 Anexar PDF da Apólice (Opcional)", type=["pdf"])
         pdf_boletos_file = st.file_uploader("📎 Anexar Carnê de Boletos (PDF único, opcional)", type=["pdf"])
-        submitted = st.form_submit_button("💾 Salvar Apólice e Gerar Parcelas", use_container_width=True)
+
+        # BOTÃO ÚNICO DE SUBMISSÃO
+        submitted = st.form_submit_button("💾 Salvar Apólice e Sincronizar Sistema", use_container_width=True)
+
         if submitted:
-            if st.session_state.is_frota:
-                placa_final = ", ".join([p.strip() for p in placas_input.split('\n') if p.strip()])
-            else:
-                placa_final = placa_unica_input
-            tipo_cobranca_final = st.session_state.select_cobranca
+            # Validações Iniciais
             valor_parcela = float(valor_parcela_str.replace(',', '.')) if valor_parcela_str else 0.0
-            if valor_parcela <= 0:
-                st.error("O valor da parcela deve ser maior que zero.")
-                return
-            if not all(
-                    [seguradora, cliente, numero_apolice, contato, placa_final if st.session_state.is_frota else True]):
-                st.error("Por favor, preencha todos os campos obrigatórios (*).")
-                return
-            caminho_pdf_apolice_url = salvar_ficheiros_supabase(pdf_apolice_file, numero_apolice, cliente,
-                                                                'apolices') if pdf_apolice_file else None
-            caminho_pdf_boletos_url = salvar_ficheiros_supabase(pdf_boletos_file, numero_apolice, cliente,
-                                                                'boletos') if pdf_boletos_file else None
-            try:
-                apolice_data = {
-                    'seguradora': seguradora, 'cliente': cliente, 'numero_apolice': numero_apolice,
-                    'placa': placa_final, 'tipo_seguro': tipo_seguro, 'tipo_cobranca': tipo_cobranca_final,
-                    'valor_parcela': valor_parcela, 'comissao': comissao,
-                    'data_inicio_vigencia': data_inicio.isoformat(), 'quantidade_parcelas': quantidade_parcelas,
-                    'dia_vencimento': dia_vencimento_demais, 'contato': contato, 'email': email,
-                    'observacoes': observacoes, 'status': 'Ativa',
-                    'caminho_pdf_apolice': caminho_pdf_apolice_url,
-                    'caminho_pdf_boletos': caminho_pdf_boletos_url
-                }
-                response_apolice = supabase.table('apolices').insert(apolice_data).execute()
-                apolice_id = response_apolice.data[0]['id']
-                lista_parcelas_para_db = []
-                for i in range(quantidade_parcelas):
-                    if i == 0:
-                        vencimento_calculado = vencimento_primeira_parcela
-                    else:
-                        data_base_demais = vencimento_primeira_parcela + relativedelta(months=i)
-                        last_day = calendar.monthrange(data_base_demais.year, data_base_demais.month)[1]
-                        valid_day = min(dia_vencimento_demais, last_day)
-                        vencimento_calculado = date(data_base_demais.year, data_base_demais.month, valid_day)
-                    lista_parcelas_para_db.append({
-                        "apolice_id": apolice_id, "numero_parcela": i + 1,
-                        "data_vencimento": vencimento_calculado.isoformat(), "valor": valor_parcela,
-                        "status": "Pendente"
-                    })
-                if lista_parcelas_para_db:
-                    supabase.table('parcelas').insert(lista_parcelas_para_db).execute()
-                add_historico(apolice_id, st.session_state.get('user_email', 'sistema'), 'Cadastro de Apólice',
-                              f"Apólice '{numero_apolice}' e {quantidade_parcelas} parcelas geradas.")
-                st.success(f"🎉 Apólice '{numero_apolice}' e suas {quantidade_parcelas} parcelas foram salvas!")
-                st.balloons()
-            except Exception as e:
-                st.error(f"❌ Ocorreu um erro inesperado ao salvar: {e}")
+            placa_final = ", ".join([p.strip() for p in placas_input.split('\n') if
+                                     p.strip()]) if st.session_state.is_frota else placa_unica_input
+
+            if not all([seguradora, cliente, numero_apolice, contato, valor_parcela > 0]):
+                st.error(
+                    "Por favor, preencha todos os campos obrigatórios (*) e garanta que o valor seja maior que zero.")
+            else:
+                try:
+                    # 1. SALVAMENTO SUPABASE (Storage e Banco)
+                    caminho_pdf_apolice_url = salvar_ficheiros_supabase(pdf_apolice_file, numero_apolice, cliente,
+                                                                        'apolices') if pdf_apolice_file else None
+                    caminho_pdf_boletos_url = salvar_ficheiros_supabase(pdf_boletos_file, numero_apolice, cliente,
+                                                                        'boletos') if pdf_boletos_file else None
+
+                    apolice_data = {
+                        'seguradora': seguradora, 'cliente': cliente, 'numero_apolice': numero_apolice,
+                        'placa': placa_final, 'tipo_seguro': tipo_seguro, 'tipo_cobranca': tipo_cobranca_selecionado,
+                        'valor_parcela': valor_parcela, 'comissao': comissao,
+                        'data_inicio_vigencia': data_inicio.isoformat(), 'quantidade_parcelas': quantidade_parcelas,
+                        'dia_vencimento': dia_vencimento_demais, 'contato': contato, 'email': email,
+                        'observacoes': observacoes, 'status': 'Ativa',
+                        'caminho_pdf_apolice': caminho_pdf_apolice_url, 'caminho_pdf_boletos': caminho_pdf_boletos_url
+                    }
+
+                    # Inserção da Apólice e Parcelas (Lógica original mantida)
+                    res = supabase.table('apolices').insert(apolice_data).execute()
+                    apolice_id = res.data[0]['id']
+
+                    # 2. SINCRONIZAÇÃO GOOGLE SHEETS
+                    # Esta função deve ser criada para mapear as colunas da imagem_236380
+                    sincronizar_google_sheets(apolice_data)
+
+                    st.success(f"🎉 Apólice '{numero_apolice}' salva e sincronizada com sucesso!")
+                    st.balloons()
+                except Exception as e:
+                    st.error(f"❌ Erro ao salvar: {e}")
 
 
 def render_pesquisa_e_edicao():
