@@ -33,8 +33,6 @@ except ImportError as e:
             "placa": "",
             "vigencia": date.today()
         }
-
-
 # --- IMPORTAÇÕES EXTRAS (AGENDADOR E AGENTE) ---
 import schedule  # Biblioteca para rodar o robô as 09:00
 
@@ -1253,6 +1251,11 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+
+
+
 
 
 
