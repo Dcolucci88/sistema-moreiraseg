@@ -8,12 +8,21 @@ from pydantic import BaseModel, Field
 # Estrutura que garante que a IA não "invente" campos
 class DadosApolice(BaseModel):
     seguradora: str = Field(description="Nome da seguradora (ex: KOVR, ESSOR)")
-    numero: str = Field(description="Número da apólice (campo 'Apólice Número' no PDF)")
+    numero: str = Field(
+        description=(
+            "Número da apólice. "
+            "Na apólice KOVR é o valor do campo 'Apólice Número' (ex: 1002300081517). "
+            "Não use o campo 'Ramo' ou 'Número da Proposta'."
+        )
+    )
     cliente: str = Field(description="Nome completo do segurado")
     placa: str = Field(description="Placa/Licença do veículo, se houver")
-    vigencia: str = Field(description="Data de início da vigência (campo 'Das 24:00 h do dia ...') em DD/MM/AAAA")
-    valor_parcela: float = Field(description="Valor de cada parcela (campo 'Demais' do parcelamento)")
-
+    vigencia: str = Field(
+        description="Data de início da vigência (a primeira data do período 'Das 24:00 h do dia ...') em DD/MM/AAAA"
+    )
+    valor_parcela: float = Field(
+        description="Valor de cada parcela (coluna 'Demais' no quadro de parcelamento)"
+    )
 
 
 def extrair_dados_apolice(arquivo_pdf):
@@ -30,11 +39,12 @@ def extrair_dados_apolice(arquivo_pdf):
     Leia cuidadosamente a apólice abaixo e preencha os campos do JSON seguindo estas regras:
 
     - "seguradora": nome da seguradora (ex: KOVR Seguradora S.A).
-    - "numero": valor do campo "Apólice Número".
+    - "numero": número da APÓLICE. Use o valor do campo "Apólice Número"
+      (ex: 1002300081517). NÃO use os campos "Ramo", "Número da Proposta" ou "Endosso".
     - "cliente": nome do segurado.
     - "placa": valor do campo "Licença" do veículo (se existir, senão deixe vazio).
-    - "vigencia": data de início da vigência (a primeira data do período "Das 24:00 h do dia XX/XX/XXXX até ...").
-    - "valor_parcela": valor em reais da coluna "Demais" do quadro de parcelamento (não some nada, pegue o valor unitário).
+    - "vigencia": data de início da vigência (primeira data do período "Das 24:00 h do dia ... até ...").
+    - "valor_parcela": valor em reais da coluna "Demais" do quadro de parcelamento.
 
     Retorne somente o JSON válido.
 
