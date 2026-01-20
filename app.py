@@ -1,6 +1,12 @@
-# app.py (VERSÃO FIEL AO ORIGINAL, COM CORREÇÕES PONTUAIS E INTEGRAÇÃO DA IA E MÓDULO DE SINISTROS)
-
 import streamlit as st
+from scheduler import executar_fluxo_de_cobranca
+
+# DEVE SER O PRIMEIRO COMANDO STREAMLIT
+st.set_page_config(
+    page_title="MOREIRASEG - Corretora Inteligente",
+    page_icon="assets/Icone.png",
+    layout="wide"
+)
 import pandas as pd
 import gspread
 import datetime
@@ -14,7 +20,20 @@ from supabase import create_client, Client
 from utils.supabase_client import get_apolices
 import threading # <-- NOVO IMPORT PARA O AGENDADOR
 import time # <-- NOVO IMPORT PARA O AGENDADOR
-from extrair_dados_apolice import extrair_dados_do_pdf
+# Tenta importar a lógica de extração (IA) com proteção contra erros
+try:
+    from extrair_dados_apolice import extrair_dados_apolice
+except ImportError as e:
+    st.error(f"⚠️ O módulo de IA não pôde ser carregado no servidor: {e}")
+    def extrair_dados_apolice(arquivo):
+        return {
+            "seguradora": "",
+            "numero": "",
+            "cliente": "",
+            "placa": "",
+            "vigencia": date.today()
+        }
+
 # --- IMPORTAÇÕES EXTRAS (AGENDADOR E AGENTE) ---
 import schedule  # Biblioteca para rodar o robô as 09:00
 
@@ -78,16 +97,6 @@ if 'scheduler_thread' not in st.session_state:
 # --- CONFIGURAÇÕES GLOBAIS ---
 ASSETS_DIR = "assets"
 
-# ----------------------------
-# SEÇÃO PRINCIPAL DO STREAMLIT
-# ----------------------------
-
-st.set_page_config(layout="wide", page_title="MOREIRASEG - Corretora Inteligente")
-
-st.markdown("<h1 style='text-align: center; margin-top: -30px;'>Painel de Gestão da MOREIRASEG</h1>", unsafe_allow_html=True)
-
-# Exemplo de conteúdo principal (você pode ter mais conteúdo aqui)
-st.markdown("<p style='text-align: center;'>Bem-vindo ao painel inteligente.</p>", unsafe_allow_html=True)
 
 # --- FIM DA ESTRUTURA PRINCIPAL ---
 # ... (o restante do seu código Streamlit, como exibição de dados ou gráficos) ...
@@ -256,6 +265,37 @@ def update_apolice(apolice_id, update_data):
         st.error(f"❌ Erro ao atualizar a apólice: {e}")
         return False
 
+def sincronizar_google_sheets(dados):
+    """Envia os dados reais da MoreiraSeg para a planilha FECHAMENTO RCO."""
+    try:
+        # Usa as credenciais que validamos com SUCESSO TOTAL
+        gc = gspread.service_account(filename='credentials.json')
+        sh = gc.open("FECHAMENTO RCO")
+
+        # Identifica a aba pelo mês (ex: JAN-2026)
+        nome_aba = datetime.datetime.now().strftime("%b-%Y").upper().replace('.', '')
+
+        try:
+            worksheet = sh.worksheet(nome_aba)
+        except gspread.exceptions.WorksheetNotFound:
+            worksheet = sh.get_worksheet(1)  # Fallback para a primeira aba de dados
+
+        nova_linha = [
+            dados.get('seguradora', ''),
+            dados.get('numero_apolice', ''),
+            dados.get('cliente', ''),
+            dados.get('placa', ''),
+            dados.get('tipo_seguro', ''),
+            dados.get('data_inicio_vigencia', ''),
+            dados.get('valor_parcela', 0),
+            dados.get('comissao', 0)
+        ]
+
+        worksheet.append_row(nova_linha)
+        return True
+    except Exception as e:
+        st.error(f"⚠️ Erro ao sincronizar com Google Sheets: {e}")
+        return False
 
 # --- RENDERIZAÇÃO DA INTERFACE ---
 
@@ -371,7 +411,7 @@ def render_cadastro_form():
         if arquivo_ia and st.button("Executar Agente Moreira"):
             with st.spinner("Agente Moreira lendo apólice..."):
                 # Chama a função que está no seu outro arquivo
-                resultado = extrair_dados_do_pdf(arquivo_ia)
+                resultado = extrair_dados_apolice(arquivo_ia)
 
                 # Atualiza o formulário com os dados reais extraídos pela IA
                 st.session_state.dados_extraidos.update(resultado)
@@ -1207,6 +1247,11 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+
+
+
 
 
 
