@@ -17,12 +17,6 @@ class DadosApolice(BaseModel):
     )
     cliente: str = Field(description="Nome completo do segurado")
     placa: str = Field(description="Placa/Licença do veículo, se houver")
-    vigencia: str = Field(
-        description="Data de início da vigência (a primeira data do período 'Das 24:00 h do dia ...') em DD/MM/AAAA"
-    )
-    valor_parcela: float = Field(
-        description="Valor de cada parcela (coluna 'Demais' no quadro de parcelamento)"
-    )
 
 
 def extrair_dados_apolice(arquivo_pdf):
@@ -43,9 +37,7 @@ def extrair_dados_apolice(arquivo_pdf):
       (ex: 1002300081517). NÃO use os campos "Ramo", "Número da Proposta" ou "Endosso".
     - "cliente": nome do segurado.
     - "placa": valor do campo "Licença" do veículo (se existir, senão deixe vazio).
-    - "vigencia": data de início da vigência (primeira data do período "Das 24:00 h do dia ... até ...").
-    - "valor_parcela": valor em reais da coluna "Demais" do quadro de parcelamento.
-
+    
     Retorne somente o JSON válido.
 
     TEXTO DA APÓLICE:
