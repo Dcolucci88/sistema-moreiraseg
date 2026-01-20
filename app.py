@@ -34,6 +34,7 @@ except ImportError as e:
             "vigencia": date.today()
         }
 
+
 # --- IMPORTAÇÕES EXTRAS (AGENDADOR E AGENTE) ---
 import schedule  # Biblioteca para rodar o robô as 09:00
 
@@ -462,7 +463,12 @@ def render_cadastro_form():
         st.subheader("Valores e Comissão")
         v1, v2 = st.columns(2)
         with v1:
-            valor_parcela_str = st.text_input("💰 Valor de Cada Parcela (R$)*", value="0,00")
+            valor_inicial = (
+                f"{st.session_state.dados_extraidos.get('valor_parcela', 0):.2f}".replace('.', ',')
+                if 'valor_parcela' in st.session_state.dados_extraidos
+                else "0,00"
+            )
+            valor_parcela_str = st.text_input("💰 Valor de Cada Parcela (R$)*", value=valor_inicial)
         with v2:
             comissao = st.number_input("💼 Comissão (%)*", min_value=0.0, max_value=100.0, value=10.0, step=0.5,
                                        format="%.2f")
