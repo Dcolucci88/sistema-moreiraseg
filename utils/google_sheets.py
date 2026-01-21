@@ -1,5 +1,23 @@
-import gspread
+import json
 from datetime import datetime
+
+import gspread
+from google.oauth2.service_account import Credentials
+import streamlit as st
+
+
+def criar_client_google_sheets():
+    # Lê o JSON das credenciais a partir dos secrets do Streamlit
+    creds_info = json.loads(st.secrets["google"]["credentials_json"])
+    creds = Credentials.from_service_account_info(
+        creds_info,
+        scopes=[
+            "https://www.googleapis.com/auth/spreadsheets",
+            "https://www.googleapis.com/auth/drive",
+        ],
+    )
+    return gspread.authorize(creds)
+
 
 def sincronizar_google_sheets(dados):
     """
@@ -7,9 +25,10 @@ def sincronizar_google_sheets(dados):
     'dados' é o dicionário 'apolice_data' gerado no seu app.py.
     """
     try:
-        # 1. Autenticação
-        gc = gspread.service_account(filename='credentials.json')
+        # 1. Autenticação (agora via secrets, não mais arquivo local)
+        gc = criar_client_google_sheets()
         sh = gc.open("FECHAMENTO RCO")
+
 
         # 2. Mapeamento de Meses para garantir que o nome da aba bata exatamente (ex: JAN-2026)
         # Isso evita problemas com o ponto que o Python às vezes coloca (jan. vs JAN)
